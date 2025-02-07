@@ -18,7 +18,7 @@ constexpr const auto kEglProp = "ro.hardware.egl";
 static uint64_t sProcUID = 0;
 static std::mutex sNeedInitMutex;
 static bool sNeedInit = true;
-static gfxstream::guest::IOStream* sProcessStream = nullptr;
+static gfxstream::IOStream* sProcessStream = nullptr;
 
 GfxStreamTransportType renderControlGetTransport() {
 #if defined(__Fuchsia__) || defined(LINUX_GUEST_BUILD)

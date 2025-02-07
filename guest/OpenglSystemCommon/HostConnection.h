@@ -28,8 +28,6 @@
 #include <string>
 
 #include "ExtendedRenderControl.h"
-#include "Sync.h"
-#include "VirtGpu.h"
 
 class GLEncoder;
 struct gl_client_context_t;
@@ -43,17 +41,18 @@ enum HostConnectionType {
     HOST_CONNECTION_ADDRESS_SPACE = 2,
     HOST_CONNECTION_VIRTIO_GPU_PIPE = 3,
     HOST_CONNECTION_VIRTIO_GPU_ADDRESS_SPACE = 4,
+    HOST_CONNECTION_WEBROGUE = 5,
 };
 
 class HostConnection
 {
 public:
     static HostConnection *get();
-    static HostConnection* getOrCreate(enum VirtGpuCapset capset = kCapsetNone);
-    static HostConnection* getWithThreadInfo(EGLThreadInfo* tInfo, enum VirtGpuCapset capset);
+    static HostConnection* getOrCreate();
+    static HostConnection* getWithThreadInfo(EGLThreadInfo* tInfo);
     static void exit();
 
-    static std::unique_ptr<HostConnection> createUnique(enum VirtGpuCapset capset);
+    static std::unique_ptr<HostConnection> createUnique();
     HostConnection(const HostConnection&) = delete;
 
     ~HostConnection();
@@ -66,7 +65,6 @@ public:
     gfxstream::ANativeWindowHelper* anwHelper() { return m_anwHelper.get(); }
     gfxstream::Gralloc* grallocHelper() { return m_grallocHelper.get(); }
 #endif
-    gfxstream::SyncHelper* syncHelper() { return m_syncHelper.get(); }
 
     void flush() {
         if (m_stream) {
@@ -89,7 +87,7 @@ public:
    private:
     // If the connection failed, |conn| is deleted.
     // Returns NULL if connection failed.
- static std::unique_ptr<HostConnection> connect(enum VirtGpuCapset capset);
+ static std::unique_ptr<HostConnection> connect();
 
  HostConnection();
  static gl_client_context_t* s_getGLContext();
@@ -99,7 +97,7 @@ private:
  HostConnectionType m_connectionType;
 
  // intrusively refcounted
- gfxstream::guest::IOStream* m_stream = nullptr;
+ gfxstream::IOStream* m_stream = nullptr;
 
  std::unique_ptr<GLEncoder> m_glEnc;
  std::unique_ptr<GL2Encoder> m_gl2Enc;
@@ -112,7 +110,6 @@ private:
  std::unique_ptr<gfxstream::ANativeWindowHelper> m_anwHelper;
  std::unique_ptr<gfxstream::Gralloc> m_grallocHelper;
 #endif
- std::unique_ptr<gfxstream::SyncHelper> m_syncHelper;
  bool m_noHostError;
  mutable std::mutex m_lock;
  int m_rendernodeFd;

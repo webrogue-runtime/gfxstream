@@ -353,7 +353,7 @@ int ApiGen::genEncoderHeader(const std::string &filename)
     fprintf(fp, "#define GUARD_%s\n\n", classname.c_str());
 
     fprintf(fp, "#include \"gfxstream/guest/ChecksumCalculator.h\"\n");
-    fprintf(fp, "#include \"gfxstream/guest/IOStream.h\"\n");
+    fprintf(fp, "#include \"render-utils/IOStream.h\"\n");
 
     fprintf(fp, "#include \"%s_%s_context.h\"\n\n\n", m_basename.c_str(), sideString(CLIENT_SIDE));
 
@@ -369,7 +369,7 @@ int ApiGen::genEncoderHeader(const std::string &filename)
     fprintf(fp, "\tgfxstream::guest::IOStream *m_stream;\n");
     fprintf(fp, "\tgfxstream::guest::ChecksumCalculator *m_checksumCalculator;\n\n");
 
-    fprintf(fp, "\t%s(gfxstream::guest::IOStream *stream, gfxstream::guest::ChecksumCalculator *checksumCalculator);\n", classname.c_str());
+    fprintf(fp, "\t%s(gfxstream::IOStream *stream, gfxstream::guest::ChecksumCalculator *checksumCalculator);\n", classname.c_str());
     fprintf(fp, "\tvirtual uint64_t lockAndWriteDma(void*, uint32_t) { return 0; }\n");
     fprintf(fp, "};\n\n");
 
@@ -582,7 +582,7 @@ int ApiGen::genEncoderImpl(const std::string &filename)
 
     // fprintf(fp, "namespace gfxstream {\n\n");
     fprintf(fp, "using gfxstream::guest::ChecksumCalculator;\n\n");
-    fprintf(fp, "using gfxstream::guest::IOStream;\n\n");
+    fprintf(fp, "using gfxstream::IOStream;\n\n");
     fprintf(fp, "namespace {\n\n");
 
     // unsupport printout

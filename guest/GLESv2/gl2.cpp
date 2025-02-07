@@ -21,6 +21,7 @@
 #include "GLES/glext.h"
 #include "HostConnection.h"
 #include "ThreadInfo.h"
+#include "../../include/GFXSTREAM_webrogue_unimplemented.h"
 
 //XXX: fix this macro to get the context from fast tls path
 #define GET_CONTEXT GL2Encoder * ctx = getEGLThreadInfo()->hostConn->gl2Encoder();
@@ -44,17 +45,7 @@ static EGLClient_glesInterface * s_gl = NULL;
     if (!rcEnc) {                                                    \
         ALOGE("egl: Failed to get renderControl encoder context\n"); \
         return ret;                                                  \
-    }                                                                \
-    auto* grallocHelper = hostCon->grallocHelper();                  \
-    if (!grallocHelper) {                                            \
-        ALOGE("egl: Failed to get grallocHelper\n");                 \
-        return ret;                                                  \
-    }                                                                \
-    auto* anwHelper = hostCon->anwHelper();                          \
-    if (!anwHelper) {                                                \
-        ALOGE("egl: Failed to get anwHelper\n");                     \
-        return ret;                                                  \
-    }
+    }                                                                
 
 //GL extensions
 void glEGLImageTargetTexture2DOES(void * self, GLenum target, GLeglImageOES img)
@@ -69,19 +60,7 @@ void glEGLImageTargetTexture2DOES(void * self, GLenum target, GLeglImageOES img)
     DEFINE_AND_VALIDATE_HOST_CONNECTION();
 
     if (image->target == EGL_NATIVE_BUFFER_ANDROID) {
-        EGLClientBuffer buffer = image->buffer;
-
-        if (!anwHelper->isValid(buffer)) {
-            ALOGE("Invalid native buffer.");
-            return;
-        }
-
-        ctx->override2DTextureTarget(target);
-        ctx->associateEGLImage(target, hostImage, image->width, image->height);
-
-        const int hostHandle = anwHelper->getHostHandle(buffer, grallocHelper);
-        rcEnc->rcBindTexture(rcEnc, hostHandle);
-        ctx->restore2DTextureTarget(target);
+        GFXSTREAM_NOT_IMPLEMENTED;
     } else if (image->target == EGL_GL_TEXTURE_2D_KHR) {
         ctx->override2DTextureTarget(target);
         ctx->associateEGLImage(target, hostImage, image->width, image->height);
@@ -100,19 +79,7 @@ void glEGLImageTargetRenderbufferStorageOES(void *self, GLenum target, GLeglImag
     GLeglImageOES hostImage = reinterpret_cast<GLeglImageOES>((intptr_t)image->host_egl_image);
 
     if (image->target == EGL_NATIVE_BUFFER_ANDROID) {
-        DEFINE_AND_VALIDATE_HOST_CONNECTION();
-
-        EGLClientBuffer buffer = image->buffer;
-        if (!anwHelper->isValid(buffer)) {
-            ALOGE("Invalid native buffer.");
-            return;
-        }
-
-        GET_CONTEXT;
-        ctx->associateEGLImage(target, hostImage, image->width, image->height);
-
-        const int hostHandle = anwHelper->getHostHandle(buffer, grallocHelper);
-        rcEnc->rcBindRenderbuffer(rcEnc, hostHandle);
+        GFXSTREAM_NOT_IMPLEMENTED;
     } else {
         //TODO
     }
@@ -129,6 +96,10 @@ void * getProcAddress(const char * procname)
         }
     }
     return NULL;
+}
+
+extern "C" void* webrogueGLLoader(const char * procname) {
+    return getProcAddress(procname);
 }
 
 void finish()

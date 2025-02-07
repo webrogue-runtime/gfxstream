@@ -23,11 +23,11 @@
 #include <stdlib.h>
 #include <memory>
 
-#include "gfxstream/guest/IOStream.h"
+#include "render-utils/IOStream.h"
 
 #include <qemu_pipe_bp.h>
 
-class QemuPipeStream : public gfxstream::guest::IOStream {
+class QemuPipeStream : public gfxstream::IOStream {
 public:
  typedef enum { ERR_INVALID_SOCKET = -1000 } QemuPipeStreamError;
 

@@ -18,7 +18,7 @@
 
 #include "HostConnection.h"
 #include "VirtGpu.h"
-#include "gfxstream/guest/IOStream.h"
+#include "render-utils/IOStream.h"
 
 #include <stdlib.h>
 
@@ -27,7 +27,7 @@
  * service on the host side.
  */
 
-class VirtioGpuPipeStream : public gfxstream::guest::IOStream {
+class VirtioGpuPipeStream : public gfxstream::IOStream {
    public:
     explicit VirtioGpuPipeStream(size_t bufsize, int32_t descriptor);
     ~VirtioGpuPipeStream();

@@ -485,15 +485,15 @@ EGLBoolean egl_window_surface_t::init()
         setErrorReturn(EGL_BAD_ALLOC, EGL_FALSE);
     }
     if (acquireFenceFd >= 0) {
-        auto* syncHelper = hostCon->syncHelper();
+        // auto* syncHelper = hostCon->syncHelper();
 
-        int waitRet = syncHelper->wait(acquireFenceFd, /* wait forever */-1);
-        if (waitRet < 0) {
-            ALOGE("Failed to wait for window surface's dequeued buffer.");
-            anwHelper->cancelBuffer(nativeWindow, buffer);
-        }
+        // int waitRet = syncHelper->wait(acquireFenceFd, /* wait forever */-1);
+        // if (waitRet < 0) {
+        //     ALOGE("Failed to wait for window surface's dequeued buffer.");
+        //     anwHelper->cancelBuffer(nativeWindow, buffer);
+        // }
 
-        syncHelper->close(acquireFenceFd);
+        // syncHelper->close(acquireFenceFd);
 
         if (waitRet < 0) {
             setErrorReturn(EGL_BAD_ALLOC, EGL_FALSE);
@@ -784,8 +784,8 @@ EGLBoolean egl_window_surface_t::swapBuffers()
     DPRINT("dequeueBuffer with fence %d", acquireFenceFd);
 
     if (acquireFenceFd > 0) {
-        auto* syncHelper = hostCon->syncHelper();
-        syncHelper->close(acquireFenceFd);
+        // auto* syncHelper = hostCon->syncHelper();
+        // syncHelper->close(acquireFenceFd);
     }
 
     const int hostHandle = anwHelper->getHostHandle(buffer, grallocHelper);

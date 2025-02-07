@@ -6,7 +6,7 @@
 #include "GfxStreamRenderControlConnection.h"
 
 GfxStreamRenderControlConnection::GfxStreamRenderControlConnection(
-    gfxstream::guest::IOStream* stream) {
+    gfxstream::IOStream* stream) {
     mRcEnc = std::make_unique<ExtendedRCEncoderContext>(stream, &mCheckSumHelper);
 }
 

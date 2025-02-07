@@ -140,6 +140,12 @@ typedef int EGLNativeDisplayType;
 typedef int EGLNativeWindowType;
 typedef int EGLNativePixmapType;
 
+#elif defined(__wasi__)
+
+typedef int   EGLNativeDisplayType;
+typedef void *EGLNativeWindowType;
+typedef void *EGLNativePixmapType;
+
 #else
 #error "Platform not recognized"
 #endif

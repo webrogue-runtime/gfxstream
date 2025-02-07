@@ -22,7 +22,7 @@
 
 class GfxStreamRenderControlConnection : public GfxStreamConnection {
    public:
-    GfxStreamRenderControlConnection(gfxstream::guest::IOStream* stream);
+    GfxStreamRenderControlConnection(gfxstream::IOStream* stream);
     virtual ~GfxStreamRenderControlConnection();
     void* getEncoder() override;
 

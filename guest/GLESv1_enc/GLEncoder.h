@@ -26,7 +26,7 @@
 class GLEncoder : public gl_encoder_context_t {
 
 public:
-    GLEncoder(gfxstream::guest::IOStream *stream,
+    GLEncoder(gfxstream::IOStream *stream,
               gfxstream::guest::ChecksumCalculator* protocol);
     virtual ~GLEncoder();
     void setClientState(gfxstream::guest::GLClientState *state) {

@@ -40,6 +40,9 @@ public:
     virtual int writeFully(const void* buf, size_t len) = 0;
     virtual const unsigned char *readFully( void *buf, size_t len) = 0;
 
+    void readbackPixels(void* context, int width, int height, unsigned int format, unsigned int type, void* pixels);
+    void uploadPixels(void* context, int width, int height, int depth, unsigned int format, unsigned int type, const void* pixels);
+
     size_t read(void* buf, size_t bufLen) {
         if (!readRaw(buf, &bufLen)) {
             return 0;
@@ -85,14 +88,14 @@ public:
         return readFully(buf, len);
     }
 
-    void save(android::base::Stream* stream) {
+    void save(gfxstream::guest::Stream* stream) {
         stream->putBe32(m_bufsize);
         stream->putBe32(m_free);
         stream->putByte(m_buf != nullptr);
         onSave(stream);
     }
 
-    void load(android::base::Stream* stream) {
+    void load(gfxstream::guest::Stream* stream) {
         m_bufsize = stream->getBe32();
         m_free = stream->getBe32();
         const bool haveBuf = stream->getByte();
@@ -105,8 +108,8 @@ public:
 
 protected:
     virtual const unsigned char *readRaw(void *buf, size_t *inout_len) = 0;
-    virtual void onSave(android::base::Stream* stream) = 0;
-    virtual unsigned char* onLoad(android::base::Stream* stream) = 0;
+    virtual void onSave(gfxstream::guest::Stream* stream) = 0;
+    virtual unsigned char* onLoad(gfxstream::guest::Stream* stream) = 0;
 
     unsigned char* m_buf = nullptr;
     size_t m_bufsize;

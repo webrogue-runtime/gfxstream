@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "gl2_client_context.h"
+#include "../../include/GFXSTREAM_webrogue_unimplemented.h"
 
 extern "C" {
 	void glActiveTexture(GLenum texture);
@@ -895,6 +896,7 @@ void glGetShaderSource(GLuint shader, GLsizei bufsize, GLsizei* length, GLchar* 
 
 const GLubyte* glGetString(GLenum name)
 {
+	GFXSTREAM_NOT_IMPLEMENTED;
 	GET_CONTEXT;
 	return ctx->glGetString(ctx, name);
 }

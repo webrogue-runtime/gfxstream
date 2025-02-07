@@ -20,11 +20,11 @@
 #include <EGL/eglext.h>
 #include <GLES/gl.h>
 
-#include <hardware/hardware.h>
-#include <hardware/gralloc.h>
+// #include <hardware/hardware.h>
+// #include <hardware/gralloc.h>
 
-#include <nativebase/nativebase.h>
-#include <cutils/native_handle.h>
+// #include <nativebase/nativebase.h>
+// #include <cutils/native_handle.h>
 
 struct EGLImage_t
 {

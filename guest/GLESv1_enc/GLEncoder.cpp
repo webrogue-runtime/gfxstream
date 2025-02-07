@@ -21,7 +21,7 @@
 
 using gfxstream::guest::BufferData;
 using gfxstream::guest::ChecksumCalculator;
-using gfxstream::guest::IOStream;
+using gfxstream::IOStream;
 using gfxstream::guest::GLClientState;
 
 #ifndef MIN

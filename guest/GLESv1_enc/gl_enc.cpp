@@ -18,7 +18,7 @@
 
 using gfxstream::guest::ChecksumCalculator;
 
-using gfxstream::guest::IOStream;
+using gfxstream::IOStream;
 
 namespace {
 
