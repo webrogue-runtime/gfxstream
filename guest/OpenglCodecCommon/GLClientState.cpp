@@ -15,7 +15,10 @@
 */
 #include "gfxstream/guest/GLClientState.h"
 
-#include <cutils/log.h>
+#define ALOGE(...) fprintf(stderr, __VA_ARGS__)
+#define ALOGW(...) fprintf(stderr, __VA_ARGS__)
+#define ALOGV(...) fprintf(stderr, __VA_ARGS__)
+#define ALOGD(...) fprintf(stderr, __VA_ARGS__)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

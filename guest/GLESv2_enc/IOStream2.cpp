@@ -1,4 +1,4 @@
-#include "gfxstream/guest/IOStream.h"
+#include "render-utils/IOStream.h"
 
 #include "GL2Encoder.h"
 
@@ -9,7 +9,6 @@
 #include <assert.h>
 
 namespace gfxstream {
-namespace guest {
 
 void IOStream::readbackPixels(void* context, int width, int height, unsigned int format, unsigned int type, void* pixels) {
     GL2Encoder *ctx = (GL2Encoder *)context;
@@ -204,5 +203,4 @@ void IOStream::uploadPixels(void* context, int width, int height, int depth, uns
     }
 }
 
-}  // namespace guest
 }  // namespace gfxstream

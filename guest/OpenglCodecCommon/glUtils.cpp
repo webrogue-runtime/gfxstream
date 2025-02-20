@@ -18,9 +18,9 @@
 #include <GLES3/gl31.h>
 #include <string.h>
 
-#include "gfxstream/guest/IOStream.h"
+#include "render-utils/IOStream.h"
 
-using gfxstream::guest::IOStream;
+using gfxstream::IOStream;
 
 bool isSamplerType(GLenum type) {
     switch (type) {

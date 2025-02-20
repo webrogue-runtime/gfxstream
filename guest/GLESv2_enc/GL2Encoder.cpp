@@ -38,7 +38,7 @@ using gfxstream::guest::FBO_ATTACHMENT_TEXTURE;
 using gfxstream::guest::FboFormatInfo;
 using gfxstream::guest::GLClientState;
 using gfxstream::guest::GLSharedGroupPtr;
-using gfxstream::guest::IOStream;
+using gfxstream::IOStream;
 using gfxstream::guest::ProgramData;
 using gfxstream::guest::ShaderData;
 using gfxstream::guest::ShaderProgramData;

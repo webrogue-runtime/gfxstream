@@ -14,6 +14,8 @@
 * limitations under the License.
 */
 
+#include "../../../include/GFXSTREAM_webrogue_unimplemented.h"
+
 #include "GLESv2Decoder.h"
 #include "OpenGLESDispatch/GLESv2Dispatch.h"
 
@@ -408,46 +410,48 @@ void GLESv2Decoder::s_glUnmapBufferAEMU(void* self, GLenum target, GLintptr offs
 
 void GLESv2Decoder::s_glMapBufferRangeDMA(void* self, GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, uint64_t paddr)
 {
-    GLESv2Decoder *ctx = (GLESv2Decoder *)self;
-    // Check if this is a read or write request and not an invalidate one.
-    if ((access & (GL_MAP_READ_BIT | GL_MAP_WRITE_BIT)) &&
-        !(access & (GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT))) {
-        void* guest_buffer = emugl::g_emugl_dma_get_host_addr(paddr);
-        void* gpu_ptr = ctx->glMapBufferRange(target, offset, length, access);
+    GFXSTREAM_NOT_IMPLEMENTED;
+    // GLESv2Decoder *ctx = (GLESv2Decoder *)self;
+    // // Check if this is a read or write request and not an invalidate one.
+    // if ((access & (GL_MAP_READ_BIT | GL_MAP_WRITE_BIT)) &&
+    //     !(access & (GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT))) {
+    //     void* guest_buffer = emugl::g_emugl_dma_get_host_addr(paddr);
+    //     void* gpu_ptr = ctx->glMapBufferRange(target, offset, length, access);
 
-        // map failed, no need to copy or unmap
-        if (!gpu_ptr) {
-            fprintf(stderr, "%s: error: could not map host gpu buffer\n", __func__);
-            return;
-        }
+    //     // map failed, no need to copy or unmap
+    //     if (!gpu_ptr) {
+    //         fprintf(stderr, "%s: error: could not map host gpu buffer\n", __func__);
+    //         return;
+    //     }
 
-        memcpy(guest_buffer, gpu_ptr, length);
-        ctx->glUnmapBuffer(target);
-    } else {
-        // if writing while not wanting to preserve previous contents,
-        // let |mapped| stay as garbage.
-    }
+    //     memcpy(guest_buffer, gpu_ptr, length);
+    //     ctx->glUnmapBuffer(target);
+    // } else {
+    //     // if writing while not wanting to preserve previous contents,
+    //     // let |mapped| stay as garbage.
+    // }
 }
 
 void GLESv2Decoder::s_glUnmapBufferDMA(void* self, GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, uint64_t paddr, GLboolean* out_res)
 {
-    GLESv2Decoder *ctx = (GLESv2Decoder *)self;
-    *out_res = GL_TRUE;
+    GFXSTREAM_NOT_IMPLEMENTED;
+    // GLESv2Decoder *ctx = (GLESv2Decoder *)self;
+    // *out_res = GL_TRUE;
 
-    if (access & GL_MAP_WRITE_BIT) {
-        if (!paddr) {
-            // guest can flush 0 in some cases
-            return;
-        }
-        void* guest_buffer = emugl::g_emugl_dma_get_host_addr(paddr);
-        void* gpu_ptr = ctx->glMapBufferRange(target, offset, length, access);
-        if (!gpu_ptr) {
-            fprintf(stderr, "%s: could not get host gpu pointer!\n", __FUNCTION__);
-            return;
-        }
-        memcpy(gpu_ptr, guest_buffer, length);
-        *out_res = ctx->glUnmapBuffer(target);
-    }
+    // if (access & GL_MAP_WRITE_BIT) {
+    //     if (!paddr) {
+    //         // guest can flush 0 in some cases
+    //         return;
+    //     }
+    //     void* guest_buffer = emugl::g_emugl_dma_get_host_addr(paddr);
+    //     void* gpu_ptr = ctx->glMapBufferRange(target, offset, length, access);
+    //     if (!gpu_ptr) {
+    //         fprintf(stderr, "%s: could not get host gpu pointer!\n", __FUNCTION__);
+    //         return;
+    //     }
+    //     memcpy(gpu_ptr, guest_buffer, length);
+    //     *out_res = ctx->glUnmapBuffer(target);
+    // }
 }
 
 static std::pair<void*, GLsizeiptr> align_pointer_size(void* ptr, GLsizeiptr length)

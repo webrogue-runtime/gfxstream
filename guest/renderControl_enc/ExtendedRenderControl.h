@@ -19,7 +19,7 @@
 
 #include "EmulatorFeatureInfo.h"
 #include "gfxstream/guest/ChecksumCalculator.h"
-#include "gfxstream/guest/IOStream.h"
+#include "render-utils/IOStream.h"
 #include "renderControl_enc.h"
 
 using gfxstream::guest::ChecksumCalculator;
@@ -28,7 +28,7 @@ using gfxstream::guest::ChecksumCalculator;
 // that will be used to track available emulator features.
 class ExtendedRCEncoderContext : public renderControl_encoder_context_t {
    public:
-    ExtendedRCEncoderContext(gfxstream::guest::IOStream* stream,
+    ExtendedRCEncoderContext(gfxstream::IOStream* stream,
                              gfxstream::guest::ChecksumCalculator* checksumCalculator)
         : renderControl_encoder_context_t(stream, checksumCalculator) {}
     void setSyncImpl(SyncImpl syncImpl) { m_featureInfo.syncImpl = syncImpl; }

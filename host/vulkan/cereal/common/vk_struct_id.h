@@ -17,6 +17,8 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
+#include "vulkan_gfxstream_structure_type.h"
+
 #include "goldfish_vk_private_defs.h"
 
 template <class T>
