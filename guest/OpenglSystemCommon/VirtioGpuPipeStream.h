@@ -18,7 +18,7 @@
 
 #include "HostConnection.h"
 #include "VirtGpu.h"
-#include "gfxstream/guest/IOStream.h"
+#include "render-utils/IOStream.h"
 
 #include <stdlib.h>
 

@@ -45,7 +45,7 @@ struct Extensions
 
 class GL2Encoder : public gl2_encoder_context_t {
 public:
- GL2Encoder(gfxstream::guest::IOStream* stream, gfxstream::guest::ChecksumCalculator* protocol);
+ GL2Encoder(gfxstream::IOStream* stream, gfxstream::guest::ChecksumCalculator* protocol);
  virtual ~GL2Encoder();
  const Extensions& getExtensions() const { return m_extensions; }
  void setDrawCallFlushInterval(uint32_t interval) { m_drawCallFlushInterval = interval; }

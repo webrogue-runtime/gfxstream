@@ -23,6 +23,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#ifdef __wasi__
+#define S gfxstream::guest::Stream
+#else
+#define S android::base::Stream
+#endif
+
 namespace gfxstream {
 
 class IOStream {
@@ -39,6 +45,9 @@ public:
     virtual int commitBuffer(size_t size) = 0;
     virtual int writeFully(const void* buf, size_t len) = 0;
     virtual const unsigned char *readFully( void *buf, size_t len) = 0;
+
+    void readbackPixels(void* context, int width, int height, unsigned int format, unsigned int type, void* pixels);
+    void uploadPixels(void* context, int width, int height, int depth, unsigned int format, unsigned int type, const void* pixels);
 
     size_t read(void* buf, size_t bufLen) {
         if (!readRaw(buf, &bufLen)) {
@@ -60,6 +69,7 @@ public:
             m_buf = (unsigned char *)allocBuffer(allocLen);
             if (!m_buf) {
                 ERR("Alloc (%u bytes) failed\n", allocLen);
+                __builtin_unreachable();
                 return NULL;
             }
             m_bufsize = m_free = allocLen;
@@ -75,8 +85,8 @@ public:
         if (!m_buf || m_free == m_bufsize) return 0;
 
         int stat = commitBuffer(m_bufsize - m_free);
-        m_buf = NULL;
-        m_free = 0;
+        // m_buf = NULL;
+        m_free = m_bufsize;
         return stat;
     }
 
@@ -85,14 +95,14 @@ public:
         return readFully(buf, len);
     }
 
-    void save(android::base::Stream* stream) {
+    void save(S* stream) {
         stream->putBe32(m_bufsize);
         stream->putBe32(m_free);
         stream->putByte(m_buf != nullptr);
         onSave(stream);
     }
 
-    void load(android::base::Stream* stream) {
+    void load(S* stream) {
         m_bufsize = stream->getBe32();
         m_free = stream->getBe32();
         const bool haveBuf = stream->getByte();
@@ -105,8 +115,8 @@ public:
 
 protected:
     virtual const unsigned char *readRaw(void *buf, size_t *inout_len) = 0;
-    virtual void onSave(android::base::Stream* stream) = 0;
-    virtual unsigned char* onLoad(android::base::Stream* stream) = 0;
+    virtual void onSave(S* stream) = 0;
+    virtual unsigned char* onLoad(S* stream) = 0;
 
     unsigned char* m_buf = nullptr;
     size_t m_bufsize;
@@ -114,3 +124,5 @@ protected:
 };
 
 }  // namespace gfxstream
+
+#undef S

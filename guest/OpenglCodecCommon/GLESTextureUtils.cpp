@@ -6,8 +6,6 @@
 #include "gfxstream/etc.h"
 #include "astc-codec.h"
 
-#include <cutils/log.h>
-
 #define ASTC_FORMATS_LIST(EXPAND_MACRO) \
     EXPAND_MACRO(GL_COMPRESSED_RGBA_ASTC_4x4_KHR, astc_codec::FootprintType::k4x4, false) \
     EXPAND_MACRO(GL_COMPRESSED_RGBA_ASTC_5x4_KHR, astc_codec::FootprintType::k5x4, false) \

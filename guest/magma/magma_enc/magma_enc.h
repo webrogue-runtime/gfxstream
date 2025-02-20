@@ -5,7 +5,7 @@
 #define GUARD_magma_encoder_context_t
 
 #include "gfxstream/guest/ChecksumCalculator.h"
-#include "gfxstream/guest/IOStream.h"
+#include "render-utils/IOStream.h"
 #include "magma_client_context.h"
 
 

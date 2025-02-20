@@ -11,7 +11,7 @@ cmake_minimum_required(VERSION 3.18)
 option(ENABLE_VKCEREAL_TESTS "Enable building vulkan-cereal unittests" OFF)
 option(BUILD_ASAN_WIN32 "Build with ASAN on Windows platform" OFF)
 
-set(VALID_DEPENDENCY_RESOLUTION AOSP SYSTEM)
+set(VALID_DEPENDENCY_RESOLUTION AOSP SYSTEM WEBROGUE)
 set(DEPENDENCY_RESOLUTION "AOSP"  CACHE STRING "\
 How to resolve the dependencies. Currently there are 3 options: AOSP, and SYSTEM. AOSP \
 will assume the repo is checked out in an Android tree, and find the dependencies through \
