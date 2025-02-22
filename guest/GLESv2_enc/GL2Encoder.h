@@ -20,7 +20,6 @@
 #include <string>
 #include <vector>
 
-#include "ProgramBinary.pb.h"
 #include "gfxstream/guest/GLClientState.h"
 #include "gfxstream/guest/GLSharedGroup.h"
 #include "gl2_enc.h"
@@ -119,7 +118,6 @@ public:
     bool isBufferMapped(GLuint buffer) const;
     bool isBufferTargetMapped(GLenum target) const;
 
-    std::optional<gfxstream::guest::gles2::ProgramBinaryInfo> getProgramBinary(GLuint program);
     void getProgramBinaryLength(GLuint program, GLint* outLength);
 
    private:
