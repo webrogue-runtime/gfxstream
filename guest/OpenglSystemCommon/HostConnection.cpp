@@ -24,8 +24,6 @@
 using gfxstream::guest::ChecksumCalculator;
 using gfxstream::IOStream;
 
-#include "../../include/GFXSTREAM_webrogue_unimplemented.h"
-
 #ifdef GOLDFISH_NO_GL
 struct gl_client_context_t {
     int placeholder;
@@ -57,7 +55,8 @@ public:
 #include "ProcessPipe.h"
 #include "ThreadInfo.h"
 
-#include "WebrogueStream.h"
+// implemented outside of this repo
+gfxstream::IOStream* makeWebrogueStream(int bufferSize);
 
 #if defined(__linux__) || defined(__ANDROID__)
 #include <fstream>
@@ -112,71 +111,6 @@ std::unique_ptr<HostConnection> HostConnection::connect() {
     con->m_connectionType = connType;
 
     switch (connType) {
-        case HOST_CONNECTION_ADDRESS_SPACE: {
-            GFXSTREAM_NOT_IMPLEMENTED
-#if defined(__ANDROID__)
-            auto stream = createGoldfishAddressSpaceStream(STREAM_BUFFER_SIZE);
-            if (!stream) {
-                ALOGE("Failed to create AddressSpaceStream for host connection\n");
-                return nullptr;
-            }
-            con->m_stream = stream;
-#else
-            ALOGE("Fatal: HOST_CONNECTION_ADDRESS_SPACE not supported on this host.");
-            abort();
-#endif
-
-            break;
-        }
-#if !defined(__Fuchsia__)
-        case HOST_CONNECTION_QEMU_PIPE: {
-            GFXSTREAM_NOT_IMPLEMENTED;
-            // auto stream = new QemuPipeStream(STREAM_BUFFER_SIZE);
-            // if (!stream) {
-            //     ALOGE("Failed to create QemuPipeStream for host connection\n");
-            //     return nullptr;
-            // }
-            // if (stream->connect() < 0) {
-            //     ALOGE("Failed to connect to host (QemuPipeStream)\n");
-            //     return nullptr;
-            // }
-            // con->m_stream = stream;
-            break;
-        }
-#endif
-        case HOST_CONNECTION_VIRTIO_GPU_PIPE: {
-            GFXSTREAM_NOT_IMPLEMENTED;
-            // auto stream = new VirtioGpuPipeStream(STREAM_BUFFER_SIZE, INVALID_DESCRIPTOR);
-            // if (!stream) {
-            //     ALOGE("Failed to create VirtioGpu for host connection\n");
-            //     return nullptr;
-            // }
-            // if (stream->connect() < 0) {
-            //     ALOGE("Failed to connect to host (VirtioGpu)\n");
-            //     return nullptr;
-            // }
-
-            // auto rendernodeFd = stream->getRendernodeFd();
-            // auto device = VirtGpuDevice::getInstance(capset);
-            // con->m_stream = stream;
-            // con->m_rendernodeFd = rendernodeFd;
-            break;
-        }
-        case HOST_CONNECTION_VIRTIO_GPU_ADDRESS_SPACE: {
-            GFXSTREAM_NOT_IMPLEMENTED
-            // // Use kCapsetGfxStreamVulkan for now, Ranchu HWC needs to be modified to pass in
-            // // right capset.
-            // auto device = VirtGpuDevice::getInstance(kCapsetGfxStreamVulkan);
-            // auto deviceHandle = device->getDeviceHandle();
-            // auto stream = createVirtioGpuAddressSpaceStream(kCapsetGfxStreamVulkan);
-            // if (!stream) {
-            //     ALOGE("Failed to create virtgpu AddressSpaceStream\n");
-            //     return nullptr;
-            // }
-            // con->m_stream = stream;
-            // con->m_rendernodeFd = deviceHandle;
-            break;
-        }
         case HOST_CONNECTION_WEBROGUE: {
             auto stream = makeWebrogueStream(STREAM_BUFFER_SIZE);
             if (!stream) {
@@ -187,7 +121,6 @@ std::unique_ptr<HostConnection> HostConnection::connect() {
             break;
         }
         default:
-            GFXSTREAM_NOT_IMPLEMENTED;
             break;
     }
 

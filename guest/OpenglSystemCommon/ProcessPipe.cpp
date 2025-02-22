@@ -22,17 +22,11 @@
 #define ALOGV(...) fprintf(stderr, __VA_ARGS__)
 #define ALOGD(...) fprintf(stderr, __VA_ARGS__)
 #include <pthread.h>
-// #include <qemu_pipe_bp.h>
 
 #include "HostConnection.h"
 
 #ifndef __Fuchsia__
 
-// #include "QemuPipeStream.h"
-// #include "VirtioGpuPipeStream.h"
-
-// static QemuPipeStream* sQemuPipeStream = nullptr;
-// static VirtioGpuPipeStream* sVirtioGpuPipeStream = nullptr;
 static int sStreamHandle = -1;
 
 #endif  // !__Fuchsia__
@@ -52,26 +46,8 @@ static void processPipeDoInit(uint32_t noRenderControlEnc) {
     // No need to setup auxiliary pipe stream in this case
     if (noRenderControlEnc) return;
 
-#if defined(__Fuchsia__)
-    // Note: sProcUID is not initialized.
     ALOGE("Fuchsia: requires noRenderControlEnc");
     abort();
-#else
-    switch (sConnType) {
-        // TODO: Move those over too
-        case HOST_CONNECTION_QEMU_PIPE:
-        case HOST_CONNECTION_ADDRESS_SPACE:
-            // sQemuPipeStream = new QemuPipeStream();
-            // sProcUID = sQemuPipeStream->processPipeInit();
-            break;
-        case HOST_CONNECTION_VIRTIO_GPU_PIPE:
-        case HOST_CONNECTION_VIRTIO_GPU_ADDRESS_SPACE: {
-            // sVirtioGpuPipeStream = new VirtioGpuPipeStream(4096, sStreamHandle);
-            // sProcUID = sVirtioGpuPipeStream->processPipeInit();
-            break;
-        }
-    }
-#endif
 }
 
 bool processPipeInit(int streamHandle, HostConnectionType connType, uint32_t noRenderControlEnc) {
@@ -90,12 +66,6 @@ bool processPipeInit(int streamHandle, HostConnectionType connType, uint32_t noR
             if (noRenderControlEnc) {
                 return true;
             }
-
-#ifndef __Fuchsia__
-            // if (!sQemuPipeStream && !sVirtioGpuPipeStream) {
-            //     return false;
-            // }
-#endif
         }
     }
 

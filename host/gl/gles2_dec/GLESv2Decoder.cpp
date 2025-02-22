@@ -14,8 +14,6 @@
 * limitations under the License.
 */
 
-#include "../../../include/GFXSTREAM_webrogue_unimplemented.h"
-
 #include "GLESv2Decoder.h"
 #include "OpenGLESDispatch/GLESv2Dispatch.h"
 
@@ -410,7 +408,8 @@ void GLESv2Decoder::s_glUnmapBufferAEMU(void* self, GLenum target, GLintptr offs
 
 void GLESv2Decoder::s_glMapBufferRangeDMA(void* self, GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, uint64_t paddr)
 {
-    GFXSTREAM_NOT_IMPLEMENTED;
+    ALOGE("GLESv2Decoder::s_glMapBufferRangeDMA not implemented");
+    abort();
     // GLESv2Decoder *ctx = (GLESv2Decoder *)self;
     // // Check if this is a read or write request and not an invalidate one.
     // if ((access & (GL_MAP_READ_BIT | GL_MAP_WRITE_BIT)) &&
@@ -434,7 +433,8 @@ void GLESv2Decoder::s_glMapBufferRangeDMA(void* self, GLenum target, GLintptr of
 
 void GLESv2Decoder::s_glUnmapBufferDMA(void* self, GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, uint64_t paddr, GLboolean* out_res)
 {
-    GFXSTREAM_NOT_IMPLEMENTED;
+    ALOGE("GLESv2Decoder::s_glUnmapBufferDMA not implemented");
+    abort();
     // GLESv2Decoder *ctx = (GLESv2Decoder *)self;
     // *out_res = GL_TRUE;
 

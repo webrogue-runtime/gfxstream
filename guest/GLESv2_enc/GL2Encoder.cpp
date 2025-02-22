@@ -31,8 +31,6 @@
 #include "GLESTextureUtils.h"
 #include "GLESv2Validation.h"
 
-#include "../../include/GFXSTREAM_webrogue_unimplemented.h"
-
 using gfxstream::guest::BufferData;
 using gfxstream::guest::ChecksumCalculator;
 using gfxstream::guest::FBO_ATTACHMENT_RENDERBUFFER;
@@ -5011,8 +5009,9 @@ const GLubyte* GL2Encoder::s_glGetStringi(void* self, GLenum name, GLuint index)
 //     return info;
 // }
 
-void GL2Encoder::getProgramBinaryLength(GLuint program, GLint* outLength) {\
-    GFXSTREAM_NOT_IMPLEMENTED;
+void GL2Encoder::getProgramBinaryLength(GLuint program, GLint* outLength) {
+    ALOGE("GL2Encoder::getProgramBinaryLength not implemented");
+    abort();
     // GL2Encoder* ctx = (GL2Encoder*)this;
 
     // VALIDATE_PROGRAM_NAME(program);
@@ -5031,7 +5030,8 @@ void GL2Encoder::getProgramBinaryLength(GLuint program, GLint* outLength) {\
 #define GL_PROGRAM_BINARY_FORMAT_GFXSTREAM_PROGRAM_BINARY_INFO_V1 0x0001
 
 void GL2Encoder::s_glGetProgramBinary(void* self, GLuint program, GLsizei bufSize, GLsizei* length, GLenum* binaryFormat, void* binary) {
-    GFXSTREAM_NOT_IMPLEMENTED;
+    ALOGE("GL2Encoder::s_glGetProgramBinary not implemented");
+    abort();
     // GL2Encoder *ctx = (GL2Encoder *)self;
 
     // VALIDATE_PROGRAM_NAME(program);
@@ -5055,7 +5055,8 @@ void GL2Encoder::s_glGetProgramBinary(void* self, GLuint program, GLsizei bufSiz
 
 void GL2Encoder::s_glProgramBinary(void* self, GLuint program, GLenum binaryFormat,
                                    const void* binary, GLsizei length) {
-    GFXSTREAM_NOT_IMPLEMENTED;
+    ALOGE("GL2Encoder::s_glProgramBinary not implemented");
+    abort();
     // GL2Encoder* ctx = (GL2Encoder*)self;
 
     // VALIDATE_PROGRAM_NAME(program);
