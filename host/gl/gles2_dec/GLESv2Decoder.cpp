@@ -23,7 +23,9 @@
 #include "host-common/vm_operations.h"
 #include "host-common/dma_device.h"
 
+#ifdef USE_EGL_GETPROCADDRESS
 #include <EGL/egl.h>
+#endif
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <GLES3/gl3.h>
