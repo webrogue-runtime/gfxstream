@@ -17,8 +17,8 @@
 
 #define ALOGE(...) fprintf(stderr, __VA_ARGS__)
 #define ALOGW(...) fprintf(stderr, __VA_ARGS__)
-#define ALOGV(...) fprintf(stderr, __VA_ARGS__)
-#define ALOGD(...) fprintf(stderr, __VA_ARGS__)
+#define ALOGV(...)
+#define ALOGD(...)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -476,6 +476,7 @@ bool GLClientState::isBufferHostMapDirty(GLuint id) const {
 }
 
 void GLClientState::setExistence(ObjectType type, bool exists, GLsizei count, const GLuint* ids) {
+    printf("GLClientState::setExistence this:%d\n", this);
     if (type == ObjectType::Sampler) {
         SamplerInfo::ScopedView view(mSamplerInfo);
         if (exists) {

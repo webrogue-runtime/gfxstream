@@ -19,8 +19,8 @@
 #include <errno.h>
 #define ALOGE(...) fprintf(stderr, __VA_ARGS__)
 #define ALOGW(...) fprintf(stderr, __VA_ARGS__)
-#define ALOGV(...) fprintf(stderr, __VA_ARGS__)
-#define ALOGD(...) fprintf(stderr, __VA_ARGS__)
+#define ALOGV(...)
+#define ALOGD(...)
 #include <pthread.h>
 
 #include "HostConnection.h"

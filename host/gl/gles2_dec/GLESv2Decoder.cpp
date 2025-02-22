@@ -408,13 +408,13 @@ void GLESv2Decoder::s_glUnmapBufferAEMU(void* self, GLenum target, GLintptr offs
 
 void GLESv2Decoder::s_glMapBufferRangeDMA(void* self, GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, uint64_t paddr)
 {
-    ALOGE("GLESv2Decoder::s_glMapBufferRangeDMA not implemented\n");
+    printf("GLESv2Decoder::s_glMapBufferRangeDMA not implemented\n");
     abort();
 }
 
 void GLESv2Decoder::s_glUnmapBufferDMA(void* self, GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access, uint64_t paddr, GLboolean* out_res)
 {
-    ALOGE("GLESv2Decoder::s_glUnmapBufferDMA not implemented\n");
+    printf("GLESv2Decoder::s_glUnmapBufferDMA not implemented\n");
     abort();
 }
 
