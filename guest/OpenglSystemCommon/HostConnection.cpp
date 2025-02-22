@@ -95,10 +95,6 @@ HostConnection::~HostConnection()
     if (m_rcEnc) {
         (void)m_rcEnc->rcGetRendererVersion(m_rcEnc.get());
     }
-
-    // if (m_stream) {
-    //     m_stream->decRef();
-    // }
 }
 
 // static
@@ -138,22 +134,7 @@ std::unique_ptr<HostConnection> HostConnection::connect() {
     }
 #endif
 
-    // con->m_syncHelper.reset(gfxstream::createPlatformSyncHelper());
-
-    // send zero 'clientFlags' to the host.
-    // unsigned int *pClientFlags =
-    //         (unsigned int *)con->m_stream->allocBuffer(sizeof(unsigned int));
-    // *pClientFlags = 0;
-    // con->m_stream->commitBuffer(sizeof(unsigned int));
-    
-
-    // if (capset == kCapsetGfxStreamMagma) {
-        noRenderControlEnc = 1;
-    // } else if (capset == kCapsetGfxStreamVulkan) {
-    //     VirtGpuDevice* instance = VirtGpuDevice::getInstance(kCapsetGfxStreamVulkan);
-    //     auto caps = instance->getCaps();
-    //     noRenderControlEnc = caps.vulkanCapset.noRenderControlEnc;
-    // }
+    noRenderControlEnc = 1;
 
     auto handle = (connType == HOST_CONNECTION_VIRTIO_GPU_ADDRESS_SPACE) ? con->m_rendernodeFd : -1;
     processPipeInit(handle, connType, noRenderControlEnc);
