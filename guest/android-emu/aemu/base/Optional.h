@@ -16,8 +16,8 @@
 
 #include "aemu/base/TypeTraits.h"
 
-#define ALOGE(...) fprintf(stderr, __VA_ARGS__)
-#define ALOGW(...) fprintf(stderr, __VA_ARGS__)
+#define ALOGE(...)
+#define ALOGW(...)
 #define ALOGV(...)
 #define ALOGD(...)
 

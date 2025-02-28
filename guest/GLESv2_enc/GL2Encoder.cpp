@@ -6441,7 +6441,7 @@ void GL2Encoder::s_glBindAttribLocation(void *self , GLuint program, GLuint inde
     SET_ERROR_IF(index > maxVertexAttribs, GL_INVALID_VALUE);
     SET_ERROR_IF(name && !strncmp("gl_", name, 3), GL_INVALID_OPERATION);
 
-    fprintf(stderr, "%s: bind attrib %u name %s\n", __func__, index, name);
+    // fprintf(stderr, "%s: bind attrib %u name %s\n", __func__, index, name);
     ctx->m_glBindAttribLocation_enc(ctx, program, index, name);
 }
 

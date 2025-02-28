@@ -66,8 +66,8 @@ gfxstream::IOStream* makeWebrogueStream(int bufferSize);
 
 #undef LOG_TAG
 #define LOG_TAG "HostConnection"
-#define ALOGE(...) fprintf(stderr, __VA_ARGS__)
-#define ALOGW(...) fprintf(stderr, __VA_ARGS__)
+#define ALOGE(...)
+#define ALOGW(...)
 #define ALOGV(...)
 #define ALOGD(...)
 
