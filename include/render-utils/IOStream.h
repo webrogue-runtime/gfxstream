@@ -69,7 +69,6 @@ public:
             m_buf = (unsigned char *)allocBuffer(allocLen);
             if (!m_buf) {
                 ERR("Alloc (%u bytes) failed\n", allocLen);
-                __builtin_unreachable();
                 return NULL;
             }
             m_bufsize = m_free = allocLen;

@@ -126,7 +126,7 @@ private:
     // Original buffer.
     const void* mOrigBuff;
     // Inplace aligned array for small enough buffers.
-    char __attribute__((__aligned__(Align))) mArray[StackSize];
+    char /* __attribute__((__aligned__(Align))) */ mArray[StackSize];
 };
 
 template <size_t StackSize = 1024, size_t Align = 8>
@@ -171,7 +171,7 @@ private:
     // Original buffer size.
     size_t mSize;
     // Inplace array for small enough buffers.
-    unsigned char __attribute__((__aligned__(Align))) mArray[StackSize];
+    unsigned char /* __attribute__((__aligned__(Align))) */ mArray[StackSize];
 };
 
 // Pin the defaults for the commonly used type names

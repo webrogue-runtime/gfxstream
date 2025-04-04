@@ -26,7 +26,7 @@
 #if TRACE_CHECKSUMHELPER
 #define LOG_CHECKSUMHELPER(x...) fprintf(stderr, x)
 #else
-#define LOG_CHECKSUMHELPER(x...)
+#define LOG_CHECKSUMHELPER(...)
 #endif
 
 namespace android { namespace base { class Stream; } }
