@@ -37,7 +37,7 @@
 #include <optional>
 #include <unordered_map>
 
-#include "FrameBuffer.h"
+// #include "FrameBuffer.h"
 #include "VkDecoderGlobalState.h"
 #include "VkDecoderSnapshot.h"
 #include "VulkanBoxedHandles.h"
@@ -177,7 +177,7 @@ size_t VkDecoder::Impl::decode(void* buf, size_t len, IOStream* ioStream,
                 WARN(
                     "Seqno %d is the same as previously processed on thread %d. It might be a "
                     "duplicate command.",
-                    seqno, getCurrentThreadId());
+                    seqno, 1);
                 metricsLogger.logMetricEvent(MetricEventDuplicateSequenceNum{.opcode = opcode});
             }
             if (seqnoPtr && !m_forSnapshotLoad) {

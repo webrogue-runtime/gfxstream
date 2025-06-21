@@ -21,7 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "FrameBuffer.h"
+// #include "FrameBuffer.h"
 #include "GraphicsDriverLock.h"
 #include "RenderThreadInfoVk.h"
 #include "TrivialStream.h"
@@ -97,7 +97,7 @@ using android::base::MetricEventBadPacketLength;
 using android::base::MetricEventDuplicateSequenceNum;
 using android::base::MetricEventVulkanOutOfMemory;
 using android::base::Optional;
-using android::base::SharedMemory;
+// using android::base::SharedMemory;
 using android::base::StaticLock;
 using emugl::ABORT_REASON_OTHER;
 using emugl::FatalError;
@@ -215,12 +215,12 @@ class VkDecoderGlobalState::Impl {
         mLogging = android::base::getEnvironmentVariable("ANDROID_EMU_VK_LOG_CALLS") == "1";
         mVerbosePrints = android::base::getEnvironmentVariable("ANDROID_EMUGL_VERBOSE") == "1";
 
-        if (get_emugl_address_space_device_control_ops().control_get_hw_funcs &&
-            get_emugl_address_space_device_control_ops().control_get_hw_funcs()) {
-            mUseOldMemoryCleanupPath = 0 == get_emugl_address_space_device_control_ops()
-                                                .control_get_hw_funcs()
-                                                ->getPhysAddrStartLocked();
-        }
+        // if (get_emugl_address_space_device_control_ops().control_get_hw_funcs &&
+        //     get_emugl_address_space_device_control_ops().control_get_hw_funcs()) {
+        //     mUseOldMemoryCleanupPath = 0 == get_emugl_address_space_device_control_ops()
+        //                                         .control_get_hw_funcs()
+        //                                         ->getPhysAddrStartLocked();
+        // }
     }
 
     ~Impl() = default;
@@ -2521,35 +2521,36 @@ class VkDecoderGlobalState::Impl {
             pCreateInfo = &decompInfo;
         }
 
-        std::unique_ptr<AndroidNativeBufferInfo> anbInfo = nullptr;
+        // std::unique_ptr<AndroidNativeBufferInfo> anbInfo = nullptr;
         const VkNativeBufferANDROID* nativeBufferANDROID =
             vk_find_struct<VkNativeBufferANDROID>(pCreateInfo);
 
         VkResult createRes = VK_SUCCESS;
 
         if (nativeBufferANDROID) {
-            auto* physicalDevice = android::base::find(mDeviceToPhysicalDevice, device);
-            if (!physicalDevice) {
-                return VK_ERROR_DEVICE_LOST;
-            }
+            // auto* physicalDevice = android::base::find(mDeviceToPhysicalDevice, device);
+            // if (!physicalDevice) {
+            //     return VK_ERROR_DEVICE_LOST;
+            // }
 
-            auto* physicalDeviceInfo = android::base::find(mPhysdevInfo, *physicalDevice);
-            if (!physicalDeviceInfo) {
-                return VK_ERROR_DEVICE_LOST;
-            }
+            // auto* physicalDeviceInfo = android::base::find(mPhysdevInfo, *physicalDevice);
+            // if (!physicalDeviceInfo) {
+            //     return VK_ERROR_DEVICE_LOST;
+            // }
 
-            const VkPhysicalDeviceMemoryProperties& memoryProperties =
-                physicalDeviceInfo->memoryPropertiesHelper->getHostMemoryProperties();
+            // const VkPhysicalDeviceMemoryProperties& memoryProperties =
+            //     physicalDeviceInfo->memoryPropertiesHelper->getHostMemoryProperties();
 
-            anbInfo = AndroidNativeBufferInfo::create(
-                m_vkEmulation, vk, device, *pool, pCreateInfo, nativeBufferANDROID, pAllocator, &memoryProperties);
-            if (anbInfo == nullptr) {
-                createRes = VK_ERROR_OUT_OF_DEVICE_MEMORY;
-            }
+            // anbInfo = AndroidNativeBufferInfo::create(
+            //     m_vkEmulation, vk, device, *pool, pCreateInfo, nativeBufferANDROID, pAllocator, &memoryProperties);
+            // if (anbInfo == nullptr) {
+            //     createRes = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+            // }
 
-            if (createRes == VK_SUCCESS) {
-                *pImage = anbInfo->getImage();
-            }
+            // if (createRes == VK_SUCCESS) {
+            //     *pImage = anbInfo->getImage();
+            // }
+            abort();
         } else {
             createRes = vk->vkCreateImage(device, pCreateInfo, pAllocator, pImage);
         }
@@ -2573,7 +2574,7 @@ class VkDecoderGlobalState::Impl {
         imageInfo.cmpInfo = std::move(cmpInfo);
         imageInfo.imageCreateInfoShallow = vk_make_orphan_copy(*pCreateInfo);
         imageInfo.layout = pCreateInfo->initialLayout;
-        imageInfo.anbInfo = std::move(anbInfo);
+        // imageInfo.anbInfo = std::move(anbInfo);
 
         if (boxImage) {
             *pImage = new_boxed_non_dispatchable_VkImage(*pImage);
@@ -2584,14 +2585,14 @@ class VkDecoderGlobalState::Impl {
     void destroyImageWithExclusiveInfo(VkDevice device, VulkanDispatch* deviceDispatch,
                                        VkImage image, ImageInfo& imageInfo,
                                        const VkAllocationCallbacks* pAllocator) {
-        if (!imageInfo.anbInfo) {
+        // if (!imageInfo.anbInfo) {
             imageInfo.cmpInfo.destroy(deviceDispatch);
             if (image != imageInfo.cmpInfo.outputImage()) {
                 deviceDispatch->vkDestroyImage(device, image, pAllocator);
             }
-        }
+        // }
 
-        imageInfo.anbInfo.reset();
+        // imageInfo.anbInfo.reset();
     }
 
     void destroyImageLocked(VkDevice device, VulkanDispatch* deviceDispatch, VkImage image,
@@ -2842,10 +2843,10 @@ class VkDecoderGlobalState::Impl {
             createInfo.subresourceRange.baseMipLevel = 0;
             pCreateInfo = &createInfo;
         }
-        if (imageInfo->anbInfo && imageInfo->anbInfo->isExternallyBacked()) {
-            createInfo = *pCreateInfo;
-            pCreateInfo = &createInfo;
-        }
+        // if (imageInfo->anbInfo && imageInfo->anbInfo->isExternallyBacked()) {
+        //     createInfo = *pCreateInfo;
+        //     pCreateInfo = &createInfo;
+        // }
 
         VkResult result = vk->vkCreateImageView(device, pCreateInfo, pAllocator, pView);
         if (result != VK_SUCCESS) {
@@ -5055,12 +5056,13 @@ class VkDecoderGlobalState::Impl {
         }
 
         if (!mUseOldMemoryCleanupPath) {
-            get_emugl_address_space_device_control_ops().register_deallocation_callback(
-                (void*)(new uint64_t(sizeToPage)), gpa, [](void* thisPtr, uint64_t gpa) {
-                    uint64_t* sizePtr = (uint64_t*)thisPtr;
-                    get_emugl_vm_operations().unmapUserBackedRam(gpa, *sizePtr);
-                    delete sizePtr;
-                });
+            abort();
+            // get_emugl_address_space_device_control_ops().register_deallocation_callback(
+            //     (void*)(new uint64_t(sizeToPage)), gpa, [](void* thisPtr, uint64_t gpa) {
+            //         uint64_t* sizePtr = (uint64_t*)thisPtr;
+            //         get_emugl_vm_operations().unmapUserBackedRam(gpa, *sizePtr);
+            //         delete sizePtr;
+            //     });
         }
 
         return true;
@@ -5458,43 +5460,44 @@ class VkDecoderGlobalState::Impl {
         std::optional<VkImportMemoryHostPointerInfoEXT> importHostInfo;
         std::optional<VkExportMemoryAllocateInfo> exportAllocateInfo;
 
-        std::optional<SharedMemory> sharedMemory = std::nullopt;
+        // std::optional<SharedMemory> sharedMemory = std::nullopt;
         std::shared_ptr<PrivateMemory> privateMemory = {};
 
         if (isExport && hostVisible) {
             if (m_vkEmulation->getFeatures().SystemBlob.enabled) {
-                // Ensure size is page-aligned.
-                VkDeviceSize alignedSize = __ALIGN(localAllocInfo.allocationSize, kPageSizeforBlob);
-                if (alignedSize != localAllocInfo.allocationSize) {
-                    ERR("Warning: Aligning allocation size from %llu to %llu",
-                        static_cast<unsigned long long>(localAllocInfo.allocationSize),
-                        static_cast<unsigned long long>(alignedSize));
-                }
-                localAllocInfo.allocationSize = alignedSize;
+                abort();
+                // // Ensure size is page-aligned.
+                // VkDeviceSize alignedSize = __ALIGN(localAllocInfo.allocationSize, kPageSizeforBlob);
+                // if (alignedSize != localAllocInfo.allocationSize) {
+                //     ERR("Warning: Aligning allocation size from %llu to %llu",
+                //         static_cast<unsigned long long>(localAllocInfo.allocationSize),
+                //         static_cast<unsigned long long>(alignedSize));
+                // }
+                // localAllocInfo.allocationSize = alignedSize;
 
-                static std::atomic<uint64_t> uniqueShmemId = 0;
-                sharedMemory = SharedMemory("shared-memory-vk-" + std::to_string(uniqueShmemId++),
-                                            localAllocInfo.allocationSize);
-                int ret = sharedMemory->create(0600);
-                if (ret) {
-                    ERR("Failed to create system-blob host-visible memory, error: %d", ret);
-                    return VK_ERROR_OUT_OF_HOST_MEMORY;
-                }
-                mappedPtr = sharedMemory->get();
-                int mappedPtrAlignment = reinterpret_cast<uintptr_t>(mappedPtr) % kPageSizeforBlob;
-                if (mappedPtrAlignment != 0) {
-                    ERR("Warning: Mapped shared memory pointer is not aligned to page size, "
-                        "alignment "
-                        "is: %d",
-                        mappedPtrAlignment);
-                }
-                importHostInfo = {
-                    .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
-                    .pNext = NULL,
-                    .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-                    .pHostPointer = mappedPtr,
-                };
-                vk_append_struct(&structChainIter, &*importHostInfo);
+                // static std::atomic<uint64_t> uniqueShmemId = 0;
+                // sharedMemory = SharedMemory("shared-memory-vk-" + std::to_string(uniqueShmemId++),
+                //                             localAllocInfo.allocationSize);
+                // int ret = sharedMemory->create(0600);
+                // if (ret) {
+                //     ERR("Failed to create system-blob host-visible memory, error: %d", ret);
+                //     return VK_ERROR_OUT_OF_HOST_MEMORY;
+                // }
+                // mappedPtr = sharedMemory->get();
+                // int mappedPtrAlignment = reinterpret_cast<uintptr_t>(mappedPtr) % kPageSizeforBlob;
+                // if (mappedPtrAlignment != 0) {
+                //     ERR("Warning: Mapped shared memory pointer is not aligned to page size, "
+                //         "alignment "
+                //         "is: %d",
+                //         mappedPtrAlignment);
+                // }
+                // importHostInfo = {
+                //     .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+                //     .pNext = NULL,
+                //     .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                //     .pHostPointer = mappedPtr,
+                // };
+                // vk_append_struct(&structChainIter, &*importHostInfo);
             } else if (m_vkEmulation->getFeatures().ExternalBlob.enabled) {
                 VkExternalMemoryHandleTypeFlags handleTypes;
 
@@ -5648,7 +5651,8 @@ class VkDecoderGlobalState::Impl {
 
             // Always assign the shared memory into memoryInfo. If it was used, then it will have
             // ownership transferred.
-            memoryInfo.sharedMemory = std::exchange(sharedMemory, std::nullopt);
+            // memoryInfo.sharedMemory = std::exchange(sharedMemory, std::nullopt);
+            abort();
 
             memoryInfo.privateMemory = privateMemory;
         }
@@ -5823,76 +5827,79 @@ class VkDecoderGlobalState::Impl {
     VkResult on_vkGetSwapchainGrallocUsageANDROID(android::base::BumpPool* pool,
                                                   VkSnapshotApiCallInfo*, VkDevice, VkFormat format,
                                                   VkImageUsageFlags imageUsage, int* grallocUsage) {
-        getGralloc0Usage(format, imageUsage, grallocUsage);
-        return VK_SUCCESS;
+        abort();
+        // getGralloc0Usage(format, imageUsage, grallocUsage);
+        // return VK_SUCCESS;
     }
 
     VkResult on_vkGetSwapchainGrallocUsage2ANDROID(
         android::base::BumpPool* pool, VkSnapshotApiCallInfo*, VkDevice, VkFormat format,
         VkImageUsageFlags imageUsage, VkSwapchainImageUsageFlagsANDROID swapchainImageUsage,
         uint64_t* grallocConsumerUsage, uint64_t* grallocProducerUsage) {
-        getGralloc1Usage(format, imageUsage, swapchainImageUsage, grallocConsumerUsage,
-                         grallocProducerUsage);
-        return VK_SUCCESS;
+        // getGralloc1Usage(format, imageUsage, swapchainImageUsage, grallocConsumerUsage,
+        //                  grallocProducerUsage);
+        // return VK_SUCCESS;
+        abort();
     }
 
     VkResult on_vkAcquireImageANDROID(android::base::BumpPool* pool, VkSnapshotApiCallInfo*,
                                       VkDevice boxed_device, VkImage image, int nativeFenceFd,
                                       VkSemaphore semaphore, VkFence fence) {
-        auto device = unbox_VkDevice(boxed_device);
-        auto vk = dispatch_VkDevice(boxed_device);
+        abort();
+        // auto device = unbox_VkDevice(boxed_device);
+        // auto vk = dispatch_VkDevice(boxed_device);
 
-        std::lock_guard<std::mutex> lock(mMutex);
+        // std::lock_guard<std::mutex> lock(mMutex);
 
-        auto* deviceInfo = android::base::find(mDeviceInfo, device);
-        if (!deviceInfo) return VK_ERROR_INITIALIZATION_FAILED;
+        // auto* deviceInfo = android::base::find(mDeviceInfo, device);
+        // if (!deviceInfo) return VK_ERROR_INITIALIZATION_FAILED;
 
-        auto* imageInfo = android::base::find(mImageInfo, image);
-        if (!imageInfo) return VK_ERROR_INITIALIZATION_FAILED;
+        // auto* imageInfo = android::base::find(mImageInfo, image);
+        // if (!imageInfo) return VK_ERROR_INITIALIZATION_FAILED;
 
-        VkQueue defaultQueue;
-        uint32_t defaultQueueFamilyIndex;
-        std::mutex* defaultQueueMutex;
-        if (!getDefaultQueueForDeviceLocked(device, &defaultQueue, &defaultQueueFamilyIndex,
-                                            &defaultQueueMutex)) {
-            INFO("%s: can't get the default q", __func__);
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
+        // VkQueue defaultQueue;
+        // uint32_t defaultQueueFamilyIndex;
+        // std::mutex* defaultQueueMutex;
+        // if (!getDefaultQueueForDeviceLocked(device, &defaultQueue, &defaultQueueFamilyIndex,
+        //                                     &defaultQueueMutex)) {
+        //     INFO("%s: can't get the default q", __func__);
+        //     return VK_ERROR_INITIALIZATION_FAILED;
+        // }
 
-        DeviceOpBuilder builder(*deviceInfo->deviceOpTracker);
+        // DeviceOpBuilder builder(*deviceInfo->deviceOpTracker);
 
-        VkFence usedFence = fence;
-        if (usedFence == VK_NULL_HANDLE) {
-            usedFence = builder.CreateFenceForOp();
-        }
+        // VkFence usedFence = fence;
+        // if (usedFence == VK_NULL_HANDLE) {
+        //     usedFence = builder.CreateFenceForOp();
+        // }
 
-        AndroidNativeBufferInfo* anbInfo = imageInfo->anbInfo.get();
+        // AndroidNativeBufferInfo* anbInfo = imageInfo->anbInfo.get();
 
-        VkResult result =
-            anbInfo->on_vkAcquireImageANDROID(m_vkEmulation, vk, device, defaultQueue, defaultQueueFamilyIndex,
-                                              defaultQueueMutex, semaphore, usedFence);
-        if (result != VK_SUCCESS) {
-            return result;
-        }
+        // VkResult result =
+        //     anbInfo->on_vkAcquireImageANDROID(m_vkEmulation, vk, device, defaultQueue, defaultQueueFamilyIndex,
+        //                                       defaultQueueMutex, semaphore, usedFence);
+        // if (result != VK_SUCCESS) {
+        //     return result;
+        // }
 
-        DeviceOpWaitable aniCompletedWaitable = builder.OnQueueSubmittedWithFence(usedFence);
+        // DeviceOpWaitable aniCompletedWaitable = builder.OnQueueSubmittedWithFence(usedFence);
 
-        if (semaphore != VK_NULL_HANDLE) {
-            auto semaphoreInfo = android::base::find(mSemaphoreInfo, semaphore);
-            if (semaphoreInfo != nullptr) {
-                semaphoreInfo->latestUse = aniCompletedWaitable;
-            }
-        }
-        if (fence != VK_NULL_HANDLE) {
-            auto fenceInfo = android::base::find(mFenceInfo, fence);
-            if (fenceInfo != nullptr) {
-                fenceInfo->latestUse = aniCompletedWaitable;
-            }
-        }
+        // if (semaphore != VK_NULL_HANDLE) {
+        //     auto semaphoreInfo = android::base::find(mSemaphoreInfo, semaphore);
+        //     if (semaphoreInfo != nullptr) {
+        //         semaphoreInfo->latestUse = aniCompletedWaitable;
+        //     }
+        // }
+        // if (fence != VK_NULL_HANDLE) {
+        //     auto fenceInfo = android::base::find(mFenceInfo, fence);
+        //     if (fenceInfo != nullptr) {
+        //         fenceInfo->latestUse = aniCompletedWaitable;
+        //     }
+        // }
 
-        deviceInfo->deviceOpTracker->PollAndProcessGarbage();
+        // deviceInfo->deviceOpTracker->PollAndProcessGarbage();
 
-        return VK_SUCCESS;
+        // return VK_SUCCESS;
     }
 
     VkResult on_vkQueueSignalReleaseImageANDROID(android::base::BumpPool* pool,
@@ -5900,38 +5907,39 @@ class VkDecoderGlobalState::Impl {
                                                  uint32_t waitSemaphoreCount,
                                                  const VkSemaphore* pWaitSemaphores, VkImage image,
                                                  int* pNativeFenceFd) {
-        auto queue = unbox_VkQueue(boxed_queue);
-        auto vk = dispatch_VkQueue(boxed_queue);
+        abort();
+        // auto queue = unbox_VkQueue(boxed_queue);
+        // auto vk = dispatch_VkQueue(boxed_queue);
 
-        std::lock_guard<std::mutex> lock(mMutex);
+        // std::lock_guard<std::mutex> lock(mMutex);
 
-        auto* queueInfo = android::base::find(mQueueInfo, queue);
-        if (!queueInfo) return VK_ERROR_INITIALIZATION_FAILED;
+        // auto* queueInfo = android::base::find(mQueueInfo, queue);
+        // if (!queueInfo) return VK_ERROR_INITIALIZATION_FAILED;
 
-        if (mRenderDocWithMultipleVkInstances) {
-            VkPhysicalDevice vkPhysicalDevice = mDeviceToPhysicalDevice.at(queueInfo->device);
-            VkInstance vkInstance = mPhysicalDeviceToInstance.at(vkPhysicalDevice);
-            mRenderDocWithMultipleVkInstances->onFrameDelimiter(vkInstance);
-        }
+        // if (mRenderDocWithMultipleVkInstances) {
+        //     VkPhysicalDevice vkPhysicalDevice = mDeviceToPhysicalDevice.at(queueInfo->device);
+        //     VkInstance vkInstance = mPhysicalDeviceToInstance.at(vkPhysicalDevice);
+        //     mRenderDocWithMultipleVkInstances->onFrameDelimiter(vkInstance);
+        // }
 
-        auto* imageInfo = android::base::find(mImageInfo, image);
-        if (!imageInfo) return VK_ERROR_INITIALIZATION_FAILED;
+        // auto* imageInfo = android::base::find(mImageInfo, image);
+        // if (!imageInfo) return VK_ERROR_INITIALIZATION_FAILED;
 
-        auto* anbInfo = imageInfo->anbInfo.get();
-        if (anbInfo->isUsingNativeImage()) {
-            // vkQueueSignalReleaseImageANDROID() is only called by the Android framework's
-            // implementation of vkQueuePresentKHR(). The guest application is responsible for
-            // transitioning the image layout of the image passed to vkQueuePresentKHR() to
-            // VK_IMAGE_LAYOUT_PRESENT_SRC_KHR before the call. If the host is using native
-            // Vulkan images where `image` is backed with the same memory as its ColorBuffer,
-            // then we need to update the tracked layout for that ColorBuffer.
-            m_vkEmulation->setColorBufferCurrentLayout(anbInfo->getColorBufferHandle(),
-                                        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-        }
+        // auto* anbInfo = imageInfo->anbInfo.get();
+        // if (anbInfo->isUsingNativeImage()) {
+        //     // vkQueueSignalReleaseImageANDROID() is only called by the Android framework's
+        //     // implementation of vkQueuePresentKHR(). The guest application is responsible for
+        //     // transitioning the image layout of the image passed to vkQueuePresentKHR() to
+        //     // VK_IMAGE_LAYOUT_PRESENT_SRC_KHR before the call. If the host is using native
+        //     // Vulkan images where `image` is backed with the same memory as its ColorBuffer,
+        //     // then we need to update the tracked layout for that ColorBuffer.
+        //     m_vkEmulation->setColorBufferCurrentLayout(anbInfo->getColorBufferHandle(),
+        //                                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        // }
 
-        return anbInfo->on_vkQueueSignalReleaseImageANDROID(
-            m_vkEmulation, vk, queueInfo->queueFamilyIndex, queue, queueInfo->queueMutex.get(),
-            waitSemaphoreCount, pWaitSemaphores, pNativeFenceFd);
+        // return anbInfo->on_vkQueueSignalReleaseImageANDROID(
+        //     m_vkEmulation, vk, queueInfo->queueFamilyIndex, queue, queueInfo->queueMutex.get(),
+        //     waitSemaphoreCount, pWaitSemaphores, pNativeFenceFd);
     }
 
     VkResult on_vkMapMemoryIntoAddressSpaceGOOGLE(android::base::BumpPool* pool,
@@ -5983,13 +5991,14 @@ class VkDecoderGlobalState::Impl {
 
         hostBlobId = (info->blobId && !hostBlobId) ? info->blobId : hostBlobId;
 
-        if (m_vkEmulation->getFeatures().SystemBlob.enabled && info->sharedMemory.has_value()) {
+        if (m_vkEmulation->getFeatures().SystemBlob.enabled && false /* info->sharedMemory.has_value()*/) {
             // We transfer ownership of the shared memory handle to the descriptor info.
             // The memory itself is destroyed only when all processes unmap / release their
             // handles.
-            ExternalObjectManager::get()->addBlobDescriptorInfo(
-                virtioGpuContextId, hostBlobId, info->sharedMemory->releaseHandle(),
-                STREAM_HANDLE_TYPE_MEM_SHM, info->caching, std::nullopt);
+            abort();
+            // ExternalObjectManager::get()->addBlobDescriptorInfo(
+            //     virtioGpuContextId, hostBlobId, info->sharedMemory->releaseHandle(),
+            //     STREAM_HANDLE_TYPE_MEM_SHM, info->caching, std::nullopt);
         } else if (m_vkEmulation->getFeatures().ExternalBlob.enabled) {
 #ifdef __APPLE__
             if (m_vkEmulation->supportsMoltenVk()) {
@@ -7793,21 +7802,22 @@ class VkDecoderGlobalState::Impl {
 
 
     AsyncResult registerQsriCallback(VkImage boxed_image, VkQsriTimeline::Callback callback) {
-        std::lock_guard<std::mutex> lock(mMutex);
+        abort();
+        // std::lock_guard<std::mutex> lock(mMutex);
 
-        VkImage image = try_unbox_VkImage(boxed_image);
-        if (image == VK_NULL_HANDLE) return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
+        // VkImage image = try_unbox_VkImage(boxed_image);
+        // if (image == VK_NULL_HANDLE) return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
 
-        auto imageInfoIt = mImageInfo.find(image);
-        if (imageInfoIt == mImageInfo.end()) return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
-        auto& imageInfo = imageInfoIt->second;
+        // auto imageInfoIt = mImageInfo.find(image);
+        // if (imageInfoIt == mImageInfo.end()) return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
+        // auto& imageInfo = imageInfoIt->second;
 
-        auto* anbInfo = imageInfo.anbInfo.get();
-        if (!anbInfo) {
-            ERR("Attempted to register QSRI callback on VkImage:%p without ANB info.", image);
-            return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
-        }
-        return anbInfo->registerQsriCallback(image, std::move(callback));
+        // auto* anbInfo = imageInfo.anbInfo.get();
+        // if (!anbInfo) {
+        //     ERR("Attempted to register QSRI callback on VkImage:%p without ANB info.", image);
+        //     return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
+        // }
+        // return anbInfo->registerQsriCallback(image, std::move(callback));
     }
 
 #define GUEST_EXTERNAL_MEMORY_HANDLE_TYPES                                \

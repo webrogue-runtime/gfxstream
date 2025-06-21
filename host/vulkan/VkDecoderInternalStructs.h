@@ -164,7 +164,7 @@ struct MemoryInfo {
     VkDevice device = VK_NULL_HANDLE;
     uint32_t memoryIndex = 0;
     // Set if the memory is backed by shared memory.
-    std::optional<android::base::SharedMemory> sharedMemory;
+    // std::optional<android::base::SharedMemory> sharedMemory;
 
     std::shared_ptr<PrivateMemory> privateMemory;
     // virtio-gpu blobs
@@ -259,7 +259,7 @@ struct BufferInfo {
 struct ImageInfo {
     VkDevice device;
     VkImageCreateInfo imageCreateInfoShallow;
-    std::unique_ptr<AndroidNativeBufferInfo> anbInfo;
+    // std::unique_ptr<AndroidNativeBufferInfo> anbInfo;
     CompressedImageInfo cmpInfo;
     // ColorBuffer, provided via vkAllocateMemory().
     std::optional<HandleType> boundColorBuffer;
