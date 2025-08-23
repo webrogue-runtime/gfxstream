@@ -5652,7 +5652,7 @@ class VkDecoderGlobalState::Impl {
             // Always assign the shared memory into memoryInfo. If it was used, then it will have
             // ownership transferred.
             // memoryInfo.sharedMemory = std::exchange(sharedMemory, std::nullopt);
-            abort();
+            // abort();
 
             memoryInfo.privateMemory = privateMemory;
         }
@@ -5722,6 +5722,7 @@ class VkDecoderGlobalState::Impl {
         if (!info || !info->ptr) return VK_ERROR_MEMORY_MAP_FAILED;  // Invalid usage.
 
         *ppData = (void*)((uint8_t*)info->ptr + offset);
+        info->webrogueMapped = true;
         return VK_SUCCESS;
     }
 

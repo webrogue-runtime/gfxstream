@@ -156,6 +156,11 @@ struct MemoryInfo {
     // GLDirectMem info
     bool directMapped = false;
     bool virtioGpuMapped = false;
+
+    bool webrogueMapped = false;
+    bool webrogueMapOffset = false;
+    bool webrogueMapped = false;
+    
     uint32_t caching = 0;
     uint64_t guestPhysAddr = 0;
     void* pageAlignedHva = nullptr;

@@ -118,6 +118,7 @@ typedef enum {
     VK_ICD_WSI_PLATFORM_GGP,
     VK_ICD_WSI_PLATFORM_SCREEN,
     VK_ICD_WSI_PLATFORM_FUCHSIA,
+    VK_ICD_WSI_PLATFORM_WEBROGUE,
 } VkIcdWsiPlatform;
 
 typedef struct {
