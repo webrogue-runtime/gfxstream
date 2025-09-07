@@ -893,6 +893,20 @@ class VkDecoderGlobalState {
                                         uint32_t typeIndexCount, uint32_t* typeBits,
                                         uint32_t typeBitsCount);
 
+    void webrogue_gfxstream_ffi_read_device_memory(
+        void* buf, 
+        uint64_t len, 
+        uint64_t offset, 
+        uint64_t boxed_deviceMemory
+    );
+
+    void webrogue_gfxstream_ffi_write_device_memory(
+        void* buf, 
+        uint64_t len, 
+        uint64_t offset, 
+        uint64_t boxed_deviceMemory
+    );
+
     // Snapshot access
     VkDecoderSnapshot* snapshot();
 

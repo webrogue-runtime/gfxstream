@@ -14,6 +14,9 @@
 #include "VkDecoderGlobalState.h"
 
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <list>
 #include <memory>
@@ -241,6 +244,7 @@ class VkDecoderGlobalState::Impl {
         mQueueInfo.clear();
         mBufferInfo.clear();
         mMemoryInfo.clear();
+        mWebrogueMemoryInfo.clear();
         mShaderModuleInfo.clear();
         mPipelineCacheInfo.clear();
         mPipelineLayoutInfo.clear();
@@ -5709,27 +5713,79 @@ class VkDecoderGlobalState::Impl {
         freeMemoryLocked(device, deviceDispatch, memory, pAllocator);
     }
 
-    VkResult on_vkMapMemory(android::base::BumpPool* pool, VkSnapshotApiCallInfo*, VkDevice,
+    VkResult on_vkMapMemory(android::base::BumpPool* pool, VkSnapshotApiCallInfo*, VkDevice device,
                             VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize size,
                             VkMemoryMapFlags flags, void** ppData) {
         std::lock_guard<std::mutex> lock(mMutex);
-        return on_vkMapMemoryLocked(0, memory, offset, size, flags, ppData);
+        return on_vkMapMemoryLocked(device, memory, offset, size, flags, ppData);
     }
-    VkResult on_vkMapMemoryLocked(VkDevice, VkDeviceMemory memory, VkDeviceSize offset,
+    VkResult on_vkMapMemoryLocked(VkDevice boxed_device, VkDeviceMemory memory, VkDeviceSize offset,
                                   VkDeviceSize size, VkMemoryMapFlags flags, void** ppData)
         REQUIRES(mMutex) {
-        auto* info = android::base::find(mMemoryInfo, memory);
-        if (!info || !info->ptr) return VK_ERROR_MEMORY_MAP_FAILED;  // Invalid usage.
+        auto device = unbox_VkDevice(boxed_device);
+        auto vk = dispatch_VkDevice(boxed_device);
 
-        *ppData = (void*)((uint8_t*)info->ptr + offset);
-        info->webrogueMapped = true;
+        void* data;
+        VkResult result = vk->vkMapMemory(device, memory, offset, size, 0, &data);
+
+        if(result != VK_SUCCESS) {
+            return result;
+        }
+
+        mWebrogueMemoryInfo[memory] = { 
+            .mappedOffset = offset, 
+            .mappedSize = size, 
+            .mappedPtr = data 
+        };
+    
         return VK_SUCCESS;
     }
 
-    void on_vkUnmapMemory(android::base::BumpPool* pool, VkSnapshotApiCallInfo*, VkDevice,
-                          VkDeviceMemory) {
-        // no-op; user-level mapping does not correspond
-        // to any operation here.
+    void webrogue_gfxstream_ffi_read_device_memory(
+        void* buf, 
+        uint64_t len, 
+        uint64_t offset, 
+        uint64_t boxed_deviceMemory
+    ) {
+        VkDeviceMemory memory = unbox_VkDeviceMemory((VkDeviceMemory)boxed_deviceMemory);
+        
+        auto* info = android::base::find(mWebrogueMemoryInfo, memory);
+        if (!info) return;
+        assert(offset >= info->mappedOffset);
+        // TODO handle "whole size" case
+        // assert(offset + len >= info->mappedOffset + info->mappedSize);
+        memcpy(buf, ((uint8_t *) info->mappedPtr) + offset - info->mappedOffset, len);
+    }
+
+    void webrogue_gfxstream_ffi_write_device_memory(
+        void* buf, 
+        uint64_t len, 
+        uint64_t offset, 
+        uint64_t boxed_deviceMemory
+    ) {
+        VkDeviceMemory memory = unbox_VkDeviceMemory((VkDeviceMemory)boxed_deviceMemory);
+        
+        auto* info = android::base::find(mWebrogueMemoryInfo, memory);
+        if (!info) return;
+        assert(offset >= info->mappedOffset);
+        // TODO handle "whole size" case
+        // assert(offset + len >= info->mappedOffset + info->mappedSize);
+        memcpy(((uint8_t *) info->mappedPtr) + offset - info->mappedOffset, buf, len);
+    }
+
+    void on_vkUnmapMemory(android::base::BumpPool* pool, VkSnapshotApiCallInfo*, VkDevice device,
+                          VkDeviceMemory memory) {
+        std::lock_guard<std::mutex> lock(mMutex);
+        on_vkUnmapMemoryLocked(device, memory);
+    }
+
+    void on_vkUnmapMemoryLocked(VkDevice boxed_device, VkDeviceMemory memory)
+        REQUIRES(mMutex) {
+        auto device = unbox_VkDevice(boxed_device);
+        auto vk = dispatch_VkDevice(boxed_device);
+
+        vk->vkUnmapMemory(device, memory);
+        mWebrogueMemoryInfo.erase(memory);
     }
 
     uint8_t* getMappedHostPointer(VkDeviceMemory memory) {
@@ -8999,6 +9055,7 @@ class VkDecoderGlobalState::Impl {
     std::unordered_map<VkDescriptorUpdateTemplate, DescriptorUpdateTemplateInfo>
         mDescriptorUpdateTemplateInfo GUARDED_BY(mMutex);
     std::unordered_map<VkDeviceMemory, MemoryInfo> mMemoryInfo GUARDED_BY(mMutex);
+    std::unordered_map<VkDeviceMemory, WebrogueMemoryInfo> mWebrogueMemoryInfo GUARDED_BY(mMutex);
     std::unordered_map<VkFence, FenceInfo> mFenceInfo GUARDED_BY(mMutex);
     std::unordered_map<VkFramebuffer, FramebufferInfo> mFramebufferInfo GUARDED_BY(mMutex);
     std::unordered_map<VkImage, ImageInfo> mImageInfo GUARDED_BY(mMutex);
@@ -10469,6 +10526,34 @@ void VkDecoderGlobalState::deviceMemoryTransform_fromhost(
 }
 
 VkDecoderSnapshot* VkDecoderGlobalState::snapshot() { return mImpl->snapshot(); }
+
+void VkDecoderGlobalState::webrogue_gfxstream_ffi_read_device_memory(
+    void* buf, 
+    uint64_t len, 
+    uint64_t offset, 
+    uint64_t boxed_deviceMemory
+) { 
+    mImpl->webrogue_gfxstream_ffi_read_device_memory(
+        buf,
+        len, 
+        offset, 
+        boxed_deviceMemory
+    ); 
+}
+
+void VkDecoderGlobalState::webrogue_gfxstream_ffi_write_device_memory(
+    void* buf, 
+    uint64_t len, 
+    uint64_t offset, 
+    uint64_t boxed_deviceMemory
+) { 
+    mImpl->webrogue_gfxstream_ffi_write_device_memory(
+        buf,
+        len, 
+        offset, 
+        boxed_deviceMemory
+    ); 
+}
 
 #define DEFINE_TRANSFORMED_TYPE_IMPL(type)                                                        \
     void VkDecoderGlobalState::transformImpl_##type##_tohost(const type* val, uint32_t count) {   \
