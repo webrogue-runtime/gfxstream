@@ -8231,12 +8231,27 @@ class VkDecoderGlobalState::Impl {
     std::vector<const char*> filteredInstanceExtensionNames(uint32_t count,
                                                             const char* const* extNames) {
         std::vector<const char*> res;
+        bool hasWebrogueSurfaceExtension = false;
         for (uint32_t i = 0; i < count; ++i) {
             auto extName = extNames[i];
+            if(strcmp(extName, "VK_WEBROGUE_surface") == 0) {
+                hasWebrogueSurfaceExtension = true;
+            }
             if (!isEmulatedInstanceExtension(extName)) {
                 res.push_back(extName);
             }
         }
+
+        // TODO check extension
+        // if(hasWebrogueSurfaceExtension) {
+        static std::vector<const char*> sWebrogueSurfaceExtensions = {
+            "VK_KHR_surface",
+            "VK_KHR_xlib_surface",
+        };
+        for (auto injectedExtensions : sWebrogueSurfaceExtensions) {
+            res.push_back(injectedExtensions);
+        }
+        // }
 
         if (m_vkEmulation->supportsExternalMemoryCapabilities()) {
             res.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
