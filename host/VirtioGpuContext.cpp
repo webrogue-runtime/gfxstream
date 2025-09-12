@@ -14,51 +14,36 @@
 
 #include "VirtioGpuContext.h"
 
-#include "host-common/AddressSpaceService.h"
-#include "host-common/opengles.h"
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 namespace host {
 
 /*static*/
-std::optional<VirtioGpuContext> VirtioGpuContext::Create(const GoldfishPipeServiceOps* ops,
+std::optional<VirtioGpuContext> VirtioGpuContext::Create(RendererPtr renderer,
                                                          VirtioGpuContextId contextId,
                                                          const std::string& contextName,
                                                          uint32_t capsetId) {
     VirtioGpuContext context = {};
+    context.mRenderer = renderer;
     context.mId = contextId;
     context.mName = contextName;
     context.mCapsetId = capsetId;
+    context.mHostPipe = std::make_shared<VirtioGpuPipe>(renderer, contextId);
 
-    auto hostPipe = ops->guest_open_with_flags(reinterpret_cast<GoldfishHwPipe*>(contextId),
-                                               0x1 /* is virtio */);
-    if (!hostPipe) {
-        stream_renderer_error("failed to create context %u: failed to create pipe.", contextId);
-        return std::nullopt;
-    }
-    stream_renderer_debug("created initial pipe for context %u: %p", contextId, hostPipe);
-    context.mHostPipe = hostPipe;
-
-    android_onGuestGraphicsProcessCreate(contextId);
+    renderer->onGuestGraphicsProcessCreate(contextId);
 
     return context;
 }
 
-int VirtioGpuContext::Destroy(const GoldfishPipeServiceOps* pipeOps,
-                              const struct address_space_device_control_ops* asgOps) {
+int VirtioGpuContext::Destroy(const address_space_device_control_ops& asgOps) {
     for (const auto& [_, handle] : mAddressSpaceHandles) {
         // Note: this can hang as is but this has only been observed to
         // happen during shutdown. See b/329287602#comment8.
-        asgOps->destroy_handle(handle);
+        asgOps.destroy_handle(handle);
     }
 
-    if (!mHostPipe) {
-        stream_renderer_error("failed to destroy context %u: missing pipe?", mId);
-        return -EINVAL;
-    }
-    pipeOps->guest_close(mHostPipe, GOLDFISH_PIPE_CLOSE_GRACEFUL);
-
-    android_cleanupProcGLObjects(mId);
+    mRenderer->cleanupProcGLObjects(mId);
 
     return 0;
 }
@@ -82,19 +67,19 @@ const std::unordered_set<VirtioGpuResourceId>& VirtioGpuContext::GetAttachedReso
     return mAttachedResources;
 }
 
-void VirtioGpuContext::SetHostPipe(GoldfishHostPipe* pipe) { mHostPipe = pipe; }
+void VirtioGpuContext::SetHostPipe(std::shared_ptr<VirtioGpuPipe> pipe) { mHostPipe = pipe; }
 
 int VirtioGpuContext::AcquireSync(uint64_t syncId) {
     if (mLatestSync) {
-        stream_renderer_error(
-            "failed to acquire sync %" PRIu64 " on context %u: sync already present?", syncId, mId);
+        GFXSTREAM_ERROR("failed to acquire sync %" PRIu64 " on context %u: sync already present?",
+                        syncId, mId);
         return -EINVAL;
     }
 
     auto descriptorOpt = ExternalObjectManager::get()->removeSyncDescriptorInfo(mId, syncId);
     if (!descriptorOpt) {
-        stream_renderer_error("failed to acquire sync %" PRIu64 " on context %u: sync not found.",
-                              syncId, mId);
+        GFXSTREAM_ERROR("failed to acquire sync %" PRIu64 " on context %u: sync not found.", syncId,
+                        mId);
         return -EINVAL;
     }
 
@@ -113,15 +98,14 @@ std::optional<SyncDescriptorInfo> VirtioGpuContext::TakeSync() {
 }
 
 int VirtioGpuContext::CreateAddressSpaceGraphicsInstance(
-    const struct address_space_device_control_ops* asgOps, VirtioGpuResource& resource) {
+    const address_space_device_control_ops& asgOps, VirtioGpuResource& resource) {
     const VirtioGpuResourceId resourceId = resource.GetId();
 
     void* resourceHva = nullptr;
     uint64_t resourceHvaSize = 0;
     if (resource.Map(&resourceHva, &resourceHvaSize) != 0) {
-        stream_renderer_error(
-            "failed to create ASG instance on context %d: failed to map resource %u", mId,
-            resourceId);
+        GFXSTREAM_ERROR("failed to create ASG instance on context %d: failed to map resource %u",
+                        mId, resourceId);
         return -EINVAL;
     }
 
@@ -129,11 +113,11 @@ int VirtioGpuContext::CreateAddressSpaceGraphicsInstance(
 
     // Note: resource ids can not be used as ASG handles because ASGs may outlive the
     // containing resource due asynchronous ASG destruction.
-    const uint32_t asgId = asgOps->gen_handle();
+    const uint32_t asgId = asgOps.gen_handle();
 
     struct AddressSpaceCreateInfo createInfo = {
         .handle = asgId,
-        .type = android::emulation::VirtioGpuGraphics,
+        .type = ADDRESS_SPACE_CONTEXT_TYPE_VIRTIO_GPU_GRAPHICS,
         .createRenderThread = true,
         .externalAddr = resourceHva,
         .externalAddrSize = resourceHvaSize,
@@ -142,7 +126,7 @@ int VirtioGpuContext::CreateAddressSpaceGraphicsInstance(
         .contextName = asgName.c_str(),
         .contextNameSize = static_cast<uint32_t>(asgName.size()),
     };
-    asgOps->create_instance(createInfo);
+    asgOps.create_instance(createInfo);
 
     mAddressSpaceHandles[resourceId] = asgId;
     return 0;
@@ -165,19 +149,19 @@ std::optional<uint32_t> VirtioGpuContext::TakeAddressSpaceGraphicsHandle(
 }
 
 int VirtioGpuContext::PingAddressSpaceGraphicsInstance(
-    const struct address_space_device_control_ops* asgOps, VirtioGpuResourceId resourceId) {
+    const address_space_device_control_ops& asgOps, VirtioGpuResourceId resourceId) {
     auto asgIt = mAddressSpaceHandles.find(resourceId);
     if (asgIt == mAddressSpaceHandles.end()) {
-        stream_renderer_error(
-            "failed to ping ASG instance on context %u resource %d: ASG not found.", mId,
-            resourceId);
+        GFXSTREAM_ERROR("failed to ping ASG instance on context %u resource %d: ASG not found.",
+                        mId, resourceId);
         return -EINVAL;
     }
     auto asgId = asgIt->second;
 
-    struct android::emulation::AddressSpaceDevicePingInfo ping = {0};
-    ping.metadata = ASG_NOTIFY_AVAILABLE;
-    asgOps->ping_at_hva(asgId, &ping);
+    AddressSpaceDevicePingInfo ping = {
+        .metadata = ASG_NOTIFY_AVAILABLE,
+    };
+    asgOps.ping_at_hva(asgId, &ping);
 
     return 0;
 }
@@ -186,8 +170,8 @@ int VirtioGpuContext::AddPendingBlob(uint32_t blobId,
                                      struct stream_renderer_resource_create_args blobArgs) {
     auto [_, inserted] = mPendingBlobs.try_emplace(blobId, blobArgs);
     if (!inserted) {
-        stream_renderer_error(
-            "failed to add pending blob %u to context %u: blob ID already in use?", blobId, mId);
+        GFXSTREAM_ERROR("failed to add pending blob %u to context %u: blob ID already in use?",
+                        blobId, mId);
         return -EINVAL;
     }
     return 0;
@@ -218,13 +202,16 @@ std::optional<VirtioGpuContextSnapshot> VirtioGpuContext::Snapshot() const {
                                                       mAttachedResources.end());
     contextSnapshot.mutable_resource_asgs()->insert(mAddressSpaceHandles.begin(),
                                                     mAddressSpaceHandles.end());
+    // TODO(b/369615058): Handle mHostPipe.
     return contextSnapshot;
 }
 
 /*static*/
 std::optional<VirtioGpuContext> VirtioGpuContext::Restore(
+    RendererPtr renderer,
     const VirtioGpuContextSnapshot& contextSnapshot) {
     VirtioGpuContext context = {};
+    context.mRenderer = renderer;
     context.mId = contextSnapshot.id();
     context.mName = contextSnapshot.name();
     context.mCapsetId = contextSnapshot.capset();
@@ -232,6 +219,7 @@ std::optional<VirtioGpuContext> VirtioGpuContext::Restore(
                                       contextSnapshot.attached_resources().end());
     context.mAddressSpaceHandles.insert(contextSnapshot.resource_asgs().begin(),
                                         contextSnapshot.resource_asgs().end());
+    // TODO(b/369615058): Handle mHostPipe.
     return context;
 }
 

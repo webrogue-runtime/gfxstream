@@ -1,19 +1,28 @@
+// Copyright 2025 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either expresso or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "SwapChainStateVk.h"
 
 #include <cinttypes>
 #include <unordered_set>
 
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/logging.h"
+#include "gfxstream/common/logging.h"
 #include "vulkan/vk_enum_string_helper.h"
-#include "vulkan/vk_util.h"
+#include "vulkan/VkUtils.h"
 
 namespace gfxstream {
 namespace vk {
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
-
 namespace {
 
 void swap(SwapchainCreateInfoWrapper& a, SwapchainCreateInfoWrapper& b) {
@@ -29,8 +38,7 @@ void swap(SwapchainCreateInfoWrapper& a, SwapchainCreateInfoWrapper& b) {
 SwapchainCreateInfoWrapper::SwapchainCreateInfoWrapper(const VkSwapchainCreateInfoKHR& createInfo)
     : mCreateInfo(createInfo) {
     if (createInfo.pNext) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "VkSwapchainCreateInfoKHR with pNext in the chain is not supported.";
+        GFXSTREAM_FATAL("VkSwapchainCreateInfoKHR with pNext in the chain is not supported.");
     }
 
     if (createInfo.pQueueFamilyIndices && (createInfo.queueFamilyIndexCount > 0)) {
@@ -45,8 +53,7 @@ SwapchainCreateInfoWrapper::SwapchainCreateInfoWrapper(const VkSwapchainCreateIn
 SwapchainCreateInfoWrapper::SwapchainCreateInfoWrapper(const SwapchainCreateInfoWrapper& other)
     : mCreateInfo(other.mCreateInfo) {
     if (other.mCreateInfo.pNext) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "VkSwapchainCreateInfoKHR with pNext in the chain is not supported.";
+        GFXSTREAM_FATAL("VkSwapchainCreateInfoKHR with pNext in the chain is not supported.");
     }
     setQueueFamilyIndices(other.mQueueFamilyIndices);
 }
@@ -171,7 +178,7 @@ std::optional<SwapchainCreateInfoWrapper> SwapChainStateVk::createSwapChainCi(
     // bug.
     if (res == VK_INCOMPLETE) {
         formatCount = (formatCount + 1) * 2;
-        INFO(
+        GFXSTREAM_INFO(
             "VK_INCOMPLETE returned by vkGetPhysicalDeviceSurfaceFormatsKHR. A possible driver "
             "bug. Retry with *pSurfaceFormatCount = %" PRIu32 ".",
             formatCount);
@@ -181,7 +188,7 @@ std::optional<SwapchainCreateInfoWrapper> SwapChainStateVk::createSwapChainCi(
         formats.resize(formatCount);
     }
     if (res == VK_INCOMPLETE) {
-        INFO(
+        GFXSTREAM_INFO(
             "VK_INCOMPLETE still returned by vkGetPhysicalDeviceSurfaceFormatsKHR with retry. A "
             "possible driver bug.");
     } else {
@@ -192,10 +199,9 @@ std::optional<SwapchainCreateInfoWrapper> SwapChainStateVk::createSwapChainCi(
             return format.format == k_vkFormat && format.colorSpace == k_vkColorSpace;
         });
     if (iSurfaceFormat == formats.end()) {
-        ERR("Failed to create swapchain: the format(%#" PRIx64
-                                ") with color space(%#" PRIx64 ") not supported.",
-                                static_cast<uint64_t>(k_vkFormat),
-                                static_cast<uint64_t>(k_vkColorSpace));
+        GFXSTREAM_ERROR("Failed to create swapchain: the format(%#" PRIx64
+                        ") with color space(%#" PRIx64 ") not supported.",
+                        static_cast<uint64_t>(k_vkFormat), static_cast<uint64_t>(k_vkColorSpace));
         return std::nullopt;
     }
 
@@ -208,7 +214,7 @@ std::optional<SwapchainCreateInfoWrapper> SwapChainStateVk::createSwapChainCi(
     std::unordered_set<VkPresentModeKHR> presentModes(presentModes_.begin(), presentModes_.end());
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
     if (!presentModes.count(VK_PRESENT_MODE_FIFO_KHR)) {
-        ERR("Failed to create swapchain: FIFO present mode not supported.");
+        GFXSTREAM_ERROR("Failed to create swapchain: FIFO present mode not supported.");
         return std::nullopt;
     }
     VkFormatProperties formatProperties = {};
@@ -219,7 +225,7 @@ std::optional<SwapchainCreateInfoWrapper> SwapChainStateVk::createSwapChainCi(
     if (!(formatFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
         // According to VUID-vkCmdBlitImage-dstImage-02000, the format features of dstImage must
         // contain VK_FORMAT_FEATURE_BLIT_DST_BIT.
-        ERR(
+        GFXSTREAM_ERROR(
             "The format %s with the optimal tiling doesn't support VK_FORMAT_FEATURE_BLIT_DST_BIT. "
             "The supported features are %s.",
             string_VkFormat(k_vkFormat), string_VkFormatFeatureFlags(formatFeatures).c_str());
@@ -228,7 +234,7 @@ std::optional<SwapchainCreateInfoWrapper> SwapChainStateVk::createSwapChainCi(
     VkSurfaceCapabilitiesKHR surfaceCaps;
     VK_CHECK(vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps));
     if (!(surfaceCaps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
-        ERR(
+        GFXSTREAM_ERROR(
             "The supported usage flags of the presentable images is %s, and don't contain "
             "VK_IMAGE_USAGE_TRANSFER_DST_BIT.",
             string_VkImageUsageFlags(surfaceCaps.supportedUsageFlags).c_str());
@@ -245,9 +251,9 @@ std::optional<SwapchainCreateInfoWrapper> SwapChainStateVk::createSwapChainCi(
         maybeExtent = VkExtent2D({width, height});
     }
     if (!maybeExtent.has_value()) {
-        ERR("Failed to create swapchain: extent(%" PRIu64 "x%" PRIu64
-                                ") not supported.",
-                                static_cast<uint64_t>(width), static_cast<uint64_t>(height));
+        GFXSTREAM_ERROR("Failed to create swapchain: extent(%" PRIu64 "x%" PRIu64
+                        ") not supported.",
+                        static_cast<uint64_t>(width), static_cast<uint64_t>(height));
         return std::nullopt;
     }
     auto extent = maybeExtent.value();
@@ -275,7 +281,7 @@ std::optional<SwapchainCreateInfoWrapper> SwapChainStateVk::createSwapChainCi(
         .clipped = VK_TRUE,
         .oldSwapchain = VK_NULL_HANDLE});
     if (queueFamilyIndices.empty()) {
-        ERR("Failed to create swapchain: no Vulkan queue family specified.");
+        GFXSTREAM_ERROR("Failed to create swapchain: no Vulkan queue family specified.");
         return std::nullopt;
     }
     if (queueFamilyIndices.size() == 1) {

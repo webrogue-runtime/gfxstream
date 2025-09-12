@@ -16,18 +16,10 @@
 #include "PostWorkerVk.h"
 
 #include "FrameBuffer.h"
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/logging.h"
+#include "gfxstream/common/logging.h"
 #include "vulkan/DisplayVk.h"
 
 namespace gfxstream {
-
-namespace {
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
-
-}  // namespace
 
 PostWorkerVk::PostWorkerVk(FrameBuffer* fb, Compositor* compositor, vk::DisplayVk* displayVk)
     : PostWorker(false, fb, compositor), m_displayVk(displayVk) {}
@@ -37,7 +29,7 @@ std::shared_future<void> PostWorkerVk::postImpl(ColorBuffer* cb) {
     completedFuture.wait();
 
     if (!m_displayVk) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << "PostWorker missing DisplayVk.";
+        GFXSTREAM_FATAL("PostWorker missing DisplayVk.");
     }
 
     constexpr const int kMaxPostRetries = 2;
@@ -49,21 +41,16 @@ std::shared_future<void> PostWorkerVk::postImpl(ColorBuffer* cb) {
         }
     }
 
-    ERR("Failed to post ColorBuffer after %d retries.", kMaxPostRetries);
+    GFXSTREAM_ERROR("Failed to post ColorBuffer after %d retries.", kMaxPostRetries);
     return completedFuture;
 }
 
-void PostWorkerVk::screenshot(ColorBuffer* cb, int width, int height, GLenum format, GLenum type,
-                              int rotation, void* pixels, Rect rect) {
-    GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-        << "Screenshot not supported with native Vulkan swapchain enabled.";
+void PostWorkerVk::viewportImpl(int width, int height) {
+    GFXSTREAM_ERROR("PostWorker with Vulkan doesn't support viewport");
 }
 
-void PostWorkerVk::viewportImpl(int width, int height) {}
-
 void PostWorkerVk::clearImpl() {
-    GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-        << "PostWorker with Vulkan doesn't support clear";
+    m_displayVk->clear();
 }
 
 void PostWorkerVk::exitImpl() {}

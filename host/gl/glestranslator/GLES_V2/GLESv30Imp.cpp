@@ -1,3 +1,17 @@
+// Copyright 2025 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either expresso or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 EXTERN_PART GL_APICALL GLconstubyteptr GL_APIENTRY glGetStringi(GLenum name, GLint index) {
     GET_CTX_V2_RET(0);
     GLconstubyteptr glGetStringiRET = ctx->dispatcher().glGetStringi(name, index);
@@ -434,11 +448,11 @@ public:
         return mSyncs.find(guestSync) != mSyncs.end();
     }
 
-    android::base::Lock& lock() { return mLock; }
+    gfxstream::base::Lock& lock() { return mLock; }
 
 private:
     std::unordered_map<GLsync, GLsync> mSyncs;
-    mutable android::base::Lock mLock;
+    mutable gfxstream::base::Lock mLock;
     uint32_t mNameCounter = 0x1;
 };
 
@@ -513,7 +527,7 @@ static void internal_glGetSynciv(GLsync sync, GLenum pname, GLsizei bufsize, GLs
 GL_APICALL GLsync GL_APIENTRY glFenceSync(GLenum condition, GLbitfield flags) {
     GET_CTX_V2_RET(0);
 
-    android::base::AutoLock lock(sSyncs()->lock());
+    gfxstream::base::AutoLock lock(sSyncs()->lock());
     GLsync hostSync = internal_glFenceSync(condition, flags);
     GLsync guestSync = sSyncs()->create(hostSync);
     return guestSync;
@@ -523,7 +537,7 @@ GL_APICALL GLenum GL_APIENTRY glClientWaitSync(GLsync wait_on, GLbitfield flags,
     GET_CTX_V2_RET(GL_WAIT_FAILED);
     GLint err = GL_NO_ERROR;
 
-    android::base::AutoLock lock(sSyncs()->lock());
+    gfxstream::base::AutoLock lock(sSyncs()->lock());
     GLsync hostSync = sSyncs()->lookupWithError(wait_on, &err);
     RET_AND_SET_ERROR_IF(err != GL_NO_ERROR, err, GL_WAIT_FAILED);
     return internal_glClientWaitSync(hostSync, flags, timeout);
@@ -533,7 +547,7 @@ GL_APICALL void GL_APIENTRY glWaitSync(GLsync wait_on, GLbitfield flags, GLuint6
     GET_CTX_V2();
     GLint err = GL_NO_ERROR;
 
-    android::base::AutoLock lock(sSyncs()->lock());
+    gfxstream::base::AutoLock lock(sSyncs()->lock());
     GLsync hostSync = sSyncs()->lookupWithError(wait_on, &err);
     SET_ERROR_IF(err != GL_NO_ERROR, err);
     internal_glWaitSync(hostSync, flags, timeout);
@@ -543,7 +557,7 @@ GL_APICALL void GL_APIENTRY glDeleteSync(GLsync to_delete) {
     GET_CTX_V2();
     GLint err = GL_NO_ERROR;
 
-    android::base::AutoLock lock(sSyncs()->lock());
+    gfxstream::base::AutoLock lock(sSyncs()->lock());
     GLsync hostSync = sSyncs()->removeWithError(to_delete, &err);
     SET_ERROR_IF(err != GL_NO_ERROR, err);
     internal_glDeleteSync(hostSync);
@@ -552,7 +566,7 @@ GL_APICALL void GL_APIENTRY glDeleteSync(GLsync to_delete) {
 GL_APICALL GLboolean GL_APIENTRY glIsSync(GLsync sync) {
     GET_CTX_V2_RET(0);
 
-    android::base::AutoLock lock(sSyncs()->lock());
+    gfxstream::base::AutoLock lock(sSyncs()->lock());
     return sSyncs()->isSync(sync) ? GL_TRUE : GL_FALSE;
 }
 
@@ -560,7 +574,7 @@ GL_APICALL void GL_APIENTRY glGetSynciv(GLsync sync, GLenum pname, GLsizei bufSi
     GET_CTX_V2();
     GLint err = GL_NO_ERROR;
 
-    android::base::AutoLock lock(sSyncs()->lock());
+    gfxstream::base::AutoLock lock(sSyncs()->lock());
     GLsync hostSync = sSyncs()->lookupWithError(sync, &err);
     SET_ERROR_IF(err != GL_NO_ERROR, err);
     ctx->dispatcher().glGetSynciv(hostSync, pname, bufSize, length, values);

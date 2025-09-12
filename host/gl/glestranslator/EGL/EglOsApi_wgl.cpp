@@ -13,31 +13,30 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
+
+// clang-format off
 #include "EglOsApi.h"
-
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/SharedLibrary.h"
-
-#include "CoreProfileConfigs.h"
-#include "host-common/logging.h"
-#include "GLcommon/GLLibrary.h"
-
-#include <windows.h>
-#include <wingdi.h>
-
-#include <GLES/glplatform.h>
-#include <GL/gl.h>
-#include <GL/wglext.h>
+// clang-format on
 
 #include <EGL/eglext.h>
+#include <GL/gl.h>
+#include <GL/wglext.h>
+#include <GLES/glplatform.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
+#include <wingdi.h>
 
 #include <algorithm>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
-#include <stdio.h>
-#include <stdlib.h>
+#include "CoreProfileConfigs.h"
+#include "GLcommon/GLLibrary.h"
+#include "gfxstream/SharedLibrary.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/common/logging.h"
 
 #define IS_TRUE(a) \
         do { if (!(a)) return NULL; } while (0)
@@ -54,7 +53,7 @@
 
 #define WGL_ERR(...)  do { \
     fprintf(stderr, __VA_ARGS__); \
-    GL_LOG(__VA_ARGS__); \
+    GFXSTREAM_ERROR(__VA_ARGS__); \
 } while(0) \
 
 // TODO: Replace with latency tracker.
@@ -62,7 +61,7 @@
 
 namespace {
 
-using android::base::SharedLibrary;
+using gfxstream::base::SharedLibrary;
 typedef GlLibrary::GlFunctionPointer GlFunctionPointer;
 
 // Returns true if an extension is include in a given extension list.
@@ -187,34 +186,31 @@ struct WglBaseDispatch {
         mLib = glLib;
         mIsSystemLib = systemLib;
 
-#define LOAD_WGL_POINTER(return_type, function_name, signature) \
-    this->function_name = reinterpret_cast< \
-            return_type (GL_APIENTRY*) signature>( \
-                    glLib->findSymbol(#function_name)); \
-    if (!this->function_name) { \
-        WGL_ERR("%s: Could not find %s in GL library\n", __FUNCTION__, \
-                #function_name); \
-        result = false; \
+#define LOAD_WGL_POINTER(return_type, function_name, signature)                                   \
+    this->function_name =                                                                         \
+        reinterpret_cast<return_type(GL_APIENTRY*) signature>(glLib->findSymbol(#function_name)); \
+    if (!this->function_name) {                                                                   \
+        WGL_ERR("%s: Could not find %s in GL library\n", __FUNCTION__,                            \
+                #function_name);                                                                  \
+        result = false;                                                                           \
     }
 
-#define LOAD_WGL_GDI32_POINTER(return_type, function_name, signature) \
-    this->function_name = reinterpret_cast< \
-            return_type (GL_APIENTRY*) signature>( \
-                    GetProcAddress(gdi32, #function_name)); \
-    if (!this->function_name) { \
-        WGL_ERR("%s: Could not find %s in GDI32 library\n", __FUNCTION__, \
-                #function_name); \
-        result = false; \
+#define LOAD_WGL_GDI32_POINTER(return_type, function_name, signature)                 \
+    this->function_name = reinterpret_cast<return_type(GL_APIENTRY*) signature>(      \
+        GetProcAddress(gdi32, #function_name));                                       \
+    if (!this->function_name) {                                                       \
+        WGL_ERR("%s: Could not find %s in GDI32 library\n", __FUNCTION__,             \
+                #function_name);                                                      \
+        result = false;                                                               \
     }
 
-#define LOAD_WGL_INNER_POINTER(return_type, function_name, signature) \
-    this->function_name = reinterpret_cast< \
-            return_type (GL_APIENTRY*) signature>( \
-                    glLib->findSymbol("wgl" #function_name)); \
-    if (!this->function_name) { \
-        WGL_ERR("%s: Could not find %s in GL library\n", __FUNCTION__, \
-                "wgl" #function_name); \
-        result = false; \
+#define LOAD_WGL_INNER_POINTER(return_type, function_name, signature)              \
+    this->function_name = reinterpret_cast<return_type(GL_APIENTRY*) signature>(   \
+        glLib->findSymbol("wgl" #function_name));                                  \
+    if (!this->function_name) {                                                    \
+        WGL_ERR("%s: Could not find %s in GL library\n", __FUNCTION__,             \
+                "wgl" #function_name);                                             \
+        result = false;                                                            \
     }
 
         LIST_WGL_FUNCTIONS(LOAD_WGL_POINTER)
@@ -398,27 +394,25 @@ public:
         }
 
         // Load each extension individually.
-#define LOAD_WGL_EXTENSION_FUNCTION(return_type, function_name, signature) \
-    this->function_name = reinterpret_cast< \
-            return_type (GL_APIENTRY*) signature>( \
-                    this->findFunction(#function_name "ARB")); \
-    if (!this->function_name) { \
-        this->function_name = reinterpret_cast< \
-                return_type (GL_APIENTRY*) signature>( \
-                        this->findFunction(#function_name "EXT")); \
-    } \
-    if (!this->function_name) { \
-        WGL_ERR("ERROR: %s: Missing extension function %s\n", __FUNCTION__, \
-            #function_name); \
-        result = false; \
+#define LOAD_WGL_EXTENSION_FUNCTION(return_type, function_name, signature)              \
+    this->function_name = reinterpret_cast<return_type(GL_APIENTRY*) signature>(        \
+        this->findFunction(#function_name "ARB"));                                      \
+    if (!this->function_name) {                                                         \
+        this->function_name = reinterpret_cast<return_type(GL_APIENTRY*) signature>(    \
+            this->findFunction(#function_name "EXT"));                                  \
+    }                                                                                   \
+    if (!this->function_name) {                                                         \
+        WGL_ERR("ERROR: %s: Missing extension function %s\n", __FUNCTION__,             \
+                #function_name);                                                        \
+        result = false;                                                                 \
     }
 
-#define LOAD_WGL_EXTENSION(extension) \
-    if (supportsExtension("WGL_ARB_" #extension, extensionList) || \
-        supportsExtension("WGL_EXT_" #extension, extensionList)) { \
-        LIST_##extension##_FUNCTIONS(LOAD_WGL_EXTENSION_FUNCTION) \
-    } else { \
-        WGL_ERR("WARNING: %s: Missing WGL extension %s\n", __FUNCTION__, #extension); \
+#define LOAD_WGL_EXTENSION(extension)                                                             \
+    if (supportsExtension("WGL_ARB_" #extension, extensionList) ||                                \
+        supportsExtension("WGL_EXT_" #extension, extensionList)) {                                \
+        LIST_##extension##_FUNCTIONS(LOAD_WGL_EXTENSION_FUNCTION)                                 \
+    } else {                                                                                      \
+        WGL_ERR("WARNING: %s: Missing WGL extension %s\n", __FUNCTION__, #extension);             \
     }
 
         LOAD_WGL_EXTENSION(pixel_format)
@@ -596,7 +590,7 @@ private:
     const WglExtensionsDispatch* m_dispatch = nullptr;
 };
 
-static android::base::StaticLock sGlobalLock;
+static gfxstream::base::StaticLock sGlobalLock;
 
 class WinContext : public EglOS::Context {
 public:
@@ -604,7 +598,7 @@ public:
         mDispatch(dispatch), mCtx(ctx) {}
 
     virtual ~WinContext() {
-        android::base::AutoLock lock(sGlobalLock);
+        gfxstream::base::AutoLock lock(sGlobalLock);
         if (!mDispatch->wglDeleteContext(mCtx)) {
             WGL_ERR("error deleting WGL context! error 0x%x\n",
                     (unsigned)GetLastError());
@@ -962,8 +956,10 @@ public:
                 dpy, 1, sizeof(PIXELFORMATDESCRIPTOR), &pfd);
 
         if (0 == maxFormat) {
-            WGL_ERR("No pixel formats found from wglDescribePixelFormat! "
-                    "error: 0x%x\n", static_cast<unsigned int>(GetLastError()));
+            WGL_ERR(
+                "No pixel formats found from wglDescribePixelFormat! "
+                "error: 0x%x\n",
+                static_cast<unsigned int>(GetLastError()));
         }
 
         // Inserting rest of formats. Try to map each one to an EGL Config.
@@ -1024,7 +1020,7 @@ public:
             const EglOS::PixelFormat* pixelFormat,
             EglOS::Context* sharedContext) {
 
-        android::base::AutoLock lock(sGlobalLock);
+        gfxstream::base::AutoLock lock(sGlobalLock);
 
         const WinPixelFormat* format = WinPixelFormat::from(pixelFormat);
         HDC dpy = mGlobals->getDummyDC(format);
@@ -1057,7 +1053,7 @@ public:
     virtual EglOS::Surface* createPbufferSurface(
             const EglOS::PixelFormat* pixelFormat,
             const EglOS::PbufferInfo* info) {
-        android::base::AutoLock lock(sGlobalLock);
+        gfxstream::base::AutoLock lock(sGlobalLock);
         (void)info;
 
         bool needPrime = false;
@@ -1101,7 +1097,7 @@ public:
     }
 
     virtual bool releasePbuffer(EglOS::Surface* pb) {
-        android::base::AutoLock lock(sGlobalLock);
+        gfxstream::base::AutoLock lock(sGlobalLock);
         if (!pb) return false;
 
         WinSurface* winpb = WinSurface::from(pb);
@@ -1130,7 +1126,7 @@ public:
     virtual bool makeCurrent(EglOS::Surface* read,
                              EglOS::Surface* draw,
                              EglOS::Context* context) {
-        android::base::AutoLock lock(sGlobalLock);
+        gfxstream::base::AutoLock lock(sGlobalLock);
         WinSurface* readWinSurface = WinSurface::from(read);
         WinSurface* drawWinSurface = WinSurface::from(draw);
         HDC hdcRead = read ? readWinSurface->getDC() : NULL;
@@ -1183,7 +1179,7 @@ public:
     }
 
     virtual void swapBuffers(EglOS::Surface* srfc) {
-        android::base::AutoLock lock(sGlobalLock);
+        gfxstream::base::AutoLock lock(sGlobalLock);
         if (srfc && !mDispatch->SwapBuffers(WinSurface::from(srfc)->getDC())) {
             GetLastError();
         }
@@ -1315,28 +1311,22 @@ WinEngine::WinEngine() :
         isSystemLib = false;
     }
     char error[256];
-    GL_LOG("%s: Trying to load %s\n", __FUNCTION__, kLibName);
+    GFXSTREAM_DEBUG("%s: Trying to load %s\n", __FUNCTION__, kLibName);
     mLib = SharedLibrary::open(kLibName, error, sizeof(error));
     if (!mLib) {
-        WGL_ERR("ERROR: %s: Could not open %s: %s\n", __FUNCTION__,
-                kLibName, error);
+        WGL_ERR("ERROR: %s: Could not open %s: %s\n", __FUNCTION__, kLibName, error);
         exit(1);
     }
 
-    GL_LOG("%s: Library loaded at %p\n", __FUNCTION__, mLib);
+    GFXSTREAM_DEBUG("%s: Library loaded at %p\n", __FUNCTION__, mLib);
     mBaseDispatch.init(mLib, isSystemLib);
     mDispatch = initExtensionsDispatch(&mBaseDispatch);
-    GL_LOG("%s: Dispatch initialized\n", __FUNCTION__);
-}
-
-static WinEngine* sHostEngine() {
-    static WinEngine* e = new WinEngine;
-    return e;
+    GFXSTREAM_DEBUG("%s: Dispatch initialized\n", __FUNCTION__);
 }
 
 }  // namespace
 
 // static
-EglOS::Engine* EglOS::Engine::getHostInstance() {
-    return sHostEngine();
+EglOS::Engine* EglOS::Engine::createHostInstance() {
+    return new WinEngine;
 }

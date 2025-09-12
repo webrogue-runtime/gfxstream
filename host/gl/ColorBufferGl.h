@@ -25,15 +25,16 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "BorrowedImage.h"
 #include "ContextHelper.h"
 #include "FrameworkFormats.h"
 #include "Handle.h"
 #include "Hwc2.h"
-#include "aemu/base/ManagedDescriptor.hpp"
-#include "aemu/base/files/Stream.h"
+#include "PixelReadFormats.h"
+#include "gfxstream/ManagedDescriptor.h"
 #include "gfxstream/host/Features.h"
+#include "gfxstream/host/borrowed_image.h"
 #include "render-utils/Renderer.h"
+#include "render-utils/stream.h"
 
 // From ANGLE "src/common/angleutils.h"
 #define GL_BGR10_A2_ANGLEX 0x6AF9
@@ -95,7 +96,8 @@ class ColorBufferGl {
                                                  FrameworkFormat frameworkFormat, HandleType handle,
                                                  ContextHelper* helper, TextureDraw* textureDraw,
                                                  bool fastBlitSupported,
-                                                 const gfxstream::host::FeatureSet& features);
+                                                 const gfxstream::host::FeatureSet& features,
+                                                 PixelReadFormats& pixelReadFormats);
 
     // Sometimes things happen and we need to reformat the GL texture
     // used. This function replaces the format of the underlying texture
@@ -163,12 +165,12 @@ class ColorBufferGl {
     // Post this ColorBuffer to the host native sub-window.
     // |rotation| is the rotation angle in degrees, clockwise in the GL
     // coordinate space.
-    bool post(GLuint tex, float rotation, float dx, float dy);
+    bool post(GLuint tex, float rotation, float dx, float dy, const float* colorTransform);
     // Post this ColorBufferGl to the host native sub-window and apply
     // the device screen overlay (if there is one).
     // |rotation| is the rotation angle in degrees, clockwise in the GL
     // coordinate space.
-    bool postViewportScaledWithOverlay(float rotation, float dx, float dy);
+    bool postViewportScaledWithOverlay(float rotation, float dx, float dy, const float* colorTransform);
 
     // Bind the current context's EGL_TEXTURE_2D texture to this ColorBufferGl's
     // EGLImage. This is intended to implement glEGLImageTargetTexture2DOES()
@@ -192,11 +194,12 @@ class ColorBufferGl {
     // readback() but async (to the specified |buffer|)
     void readbackAsync(GLuint buffer, bool readbackBgra = false);
 
-    void onSave(android::base::Stream* stream);
-    static std::unique_ptr<ColorBufferGl> onLoad(android::base::Stream* stream,
-                                                 EGLDisplay p_display, ContextHelper* helper,
-                                                 TextureDraw* textureDraw, bool fastBlitSupported,
-                                                 const gfxstream::host::FeatureSet& features);
+    void onSave(gfxstream::Stream* stream);
+    static std::unique_ptr<ColorBufferGl> onLoad(gfxstream::Stream* stream, EGLDisplay p_display,
+                                                 ContextHelper* helper, TextureDraw* textureDraw,
+                                                 bool fastBlitSupported,
+                                                 const gfxstream::host::FeatureSet& features,
+                                                 PixelReadFormats& pixelReadFormats);
 
     HandleType getHndl() const;
 
@@ -210,7 +213,7 @@ class ColorBufferGl {
     //
     // Change to opaque fd or opaque win32 handle-backed VkDeviceMemory
     // via GL_EXT_memory_objects
-    bool importMemory(android::base::ManagedDescriptor externalDescriptor, uint64_t size,
+    bool importMemory(gfxstream::base::ManagedDescriptor externalDescriptor, uint64_t size,
                       bool dedicated, bool linearTiling);
     // Change to EGL native pixmap
     bool importEglNativePixmap(void* pixmap, bool preserveContent);
@@ -226,7 +229,7 @@ class ColorBufferGl {
 
 private:
  ColorBufferGl(EGLDisplay display, HandleType hndl, GLuint width, GLuint height,
-               ContextHelper* helper, TextureDraw* textureDraw);
+               ContextHelper* helper, TextureDraw* textureDraw, PixelReadFormats& pixelReadFormats);
 
 private:
     GLuint m_tex = 0;
@@ -259,6 +262,7 @@ private:
     ContextHelper* m_helper = nullptr;
     TextureDraw* m_textureDraw = nullptr;
     TextureResize* m_resizer = nullptr;
+    PixelReadFormats& m_pixelReadFormats;
     FrameworkFormat m_frameworkFormat;
     bool m_yuv420888ToNv21 = false;
     GLuint m_yuv_conversion_fbo = 0;  // FBO to offscreen-convert YUV to RGB

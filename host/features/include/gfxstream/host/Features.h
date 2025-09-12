@@ -64,6 +64,11 @@ struct FeatureSet {
         "to compose and post frame buffers.",
         &map,
     };
+    FeatureInfo EglOnEgl = {
+        "EglOnEgl",
+        "If enabled, the GLES translator will layer on the host's EGL.",
+        &map,
+    };
     FeatureInfo ExternalBlob = {
         "ExternalBlob",
         "If enabled, virtio gpu blob resources will be allocated with external "
@@ -327,6 +332,27 @@ struct FeatureSet {
         "VulkanRobustness",
         "If enabled, robustness extensions with all supported features will be enabled on "
         "all created devices. (e.g. VK_EXT_robustness2)",
+        &map,
+    };
+    FeatureInfo VulkanDisableCoherentMemoryAndEmulate = {
+        "VulkanDisableCoherentMemoryAndEmulate",
+        "If enabled, cached memory is reported as coherent memory to the guest and the host "
+        "performs additional `vkFlushMappedMemoryRanges()` calls during queue submits to emulate.",
+        &map,
+    };
+    FeatureInfo VulkanAllocateHostVisibleAsUdmabuf = {
+        "VulkanAllocateHostVisibleAsUdmabuf",
+        "If enabled, backs blob memory via udmabuf that can be used with vkImportMemory",
+        &map,
+    };
+    FeatureInfo VulkanEnsureCachedCoherentMemoryAvailable = {
+        "VulkanEnsureCachedCoherentMemoryAvailable",
+        "If enabled, ensures that the at least one memory type that is both cached and coherent is "
+        "advertised to the guest. In the absence of any cached-coherent memory reported by host "
+        "driver, the first available "
+        "coherent memoryType will also be marked as cached before, being advertised to the guest. "
+        "This provides some "
+        "app-compatiblity for common graphics layers in the guest.",
         &map,
     };
 };

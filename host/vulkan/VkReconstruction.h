@@ -11,98 +11,72 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #pragma once
 
-#include "VkSnapshotApiCall.h"
+#include <atomic>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <set>
+
+#include "DependencyGraph.h"
+#include "VkSnapshotHandles.h"
 #include "VulkanHandleMapping.h"
 #include "VulkanHandles.h"
-#include "aemu/base/HealthMonitor.h"
-#include "aemu/base/files/Stream.h"
 #include "common/goldfish_vk_marshaling.h"
-#include "utils/GfxApiLogger.h"
+#include "gfxstream/HealthMonitor.h"
+#include "gfxstream/containers/EntityManager.h"
+#include "gfxstream/host/GfxApiLogger.h"
+#include "render-utils/stream.h"
 
 namespace gfxstream {
 namespace vk {
 
-// A class that captures all important data structures for
-// reconstructing a Vulkan system state via trimmed API record and replay.
 class VkReconstruction {
    public:
     VkReconstruction();
 
     void clear();
 
-    void saveReplayBuffers(android::base::Stream* stream);
-    static void loadReplayBuffers(android::base::Stream* stream,
+    void saveReplayBuffers(gfxstream::Stream* stream);
+    static void loadReplayBuffers(gfxstream::Stream* stream,
                                   std::vector<uint64_t>* outHandleBuffer,
                                   std::vector<uint8_t>* outDecoderBuffer);
 
-    enum HandleState { BEGIN = 0, CREATED = 0, BOUND_MEMORY = 1, HANDLE_STATE_COUNT };
+    enum HandleState { CREATED = 0 };
 
-    typedef std::pair<uint64_t, HandleState> HandleWithState;
-    struct HandleWithStateHash {
-        inline size_t operator()(const HandleWithState& v) const {
-            std::hash<uint64_t> int_hasher;
-            return int_hasher(v.first) ^ int_hasher(v.second);
-        }
-    };
+    VkSnapshotApiCallHandle createApiCallInfo();
+    void destroyApiCallInfoIfUnused(VkSnapshotApiCallHandle apiCallHandle);
 
-    struct HandleReconstruction {
-        std::vector<VkSnapshotApiCallHandle> apiRefs;
-        std::unordered_set<HandleWithState, HandleWithStateHash> childHandles;
-        std::vector<HandleWithState> parentHandles;
-    };
+    void removeHandleFromApiInfo(VkSnapshotApiCallHandle apiCallHandle, uint64_t toRemove);
 
-    struct HandleWithStateReconstruction {
-        std::vector<HandleReconstruction> states =
-            std::vector<HandleReconstruction>(HANDLE_STATE_COUNT);
-        bool delayed_destroy = false;
-        bool destroying = false;
-    };
-
-    using HandleWithStateReconstructions =
-        android::base::UnpackedComponentManager<32, 16, 16, HandleWithStateReconstruction>;
-
-    struct HandleModification {
-        std::vector<VkSnapshotApiCallHandle> apiRefs;
-        uint32_t order = 0;
-    };
-
-    using HandleModifications =
-        android::base::UnpackedComponentManager<32, 16, 16, HandleModification>;
-
-    VkSnapshotApiCallInfo* createApiCallInfo();
-    void destroyApiCallInfo(VkSnapshotApiCallHandle handle);
-    void destroyApiCallInfoIfUnused(VkSnapshotApiCallInfo* info);
-
-    void removeHandleFromApiInfo(VkSnapshotApiCallHandle h, uint64_t toRemove);
-
-    VkSnapshotApiCallInfo* getApiInfo(VkSnapshotApiCallHandle h);
-
-    void setApiTrace(VkSnapshotApiCallInfo* apiInfo, const uint8_t* traceBegin, size_t traceBytes);
+    void setApiTrace(VkSnapshotApiCallHandle apiCallHandle, const uint8_t* traceBegin, size_t traceBytes);
 
     void dump();
 
     void addHandles(const uint64_t* toAdd, uint32_t count);
     void removeHandles(const uint64_t* toRemove, uint32_t count, bool recursive = true);
 
-    void forEachHandleAddApi(const uint64_t* toProcess, uint32_t count,
-                             uint64_t VkSnapshotApiCallHandle, HandleState state = CREATED);
-    void forEachHandleDeleteApi(const uint64_t* toProcess, uint32_t count);
+    void removeGrandChildren(const uint64_t handle);
+    void removeDescendantsOfHandle(const uint64_t handle);
 
-    void addHandleDependency(const uint64_t* handles, uint32_t count, uint64_t parentHandle,
+    void forEachHandleAddApi(const uint64_t* toProcess, uint32_t count,
+                             VkSnapshotApiCallHandle apiCallHandle, HandleState state = CREATED);
+
+    void addApiCallDependencyOnVkObject(VkSnapshotApiCallHandle apiCallHandle, VkObjectHandle object);
+
+    void addHandleDependenciesForApiCallDependencies(VkSnapshotApiCallHandle apiCallHandle, VkObjectHandle child);
+
+    void addHandleDependency(const VkObjectHandle* childHandles, uint32_t childHandlesCount,
+                             VkObjectHandle parentHandle,
                              HandleState childState = CREATED, HandleState parentState = CREATED);
 
     void setCreatedHandlesForApi(VkSnapshotApiCallHandle handle , const uint64_t* created,
                                  uint32_t count);
 
-    void forEachHandleAddModifyApi(const uint64_t* toProcess, uint32_t count,
-                                   VkSnapshotApiCallHandle handle);
-
-    void forEachHandleClearModifyApi(const uint64_t* toProcess, uint32_t count);
-
-    void setModifiedHandlesForApi(VkSnapshotApiCallHandle handle, const uint64_t* modified,
-                                  uint32_t count);
+    void forEachHandleClearModifyApi(const uint64_t* toProcess, uint32_t count) {}
+    void forEachHandleAddModifyApi(const uint64_t* toProcess, uint32_t count, uint64_t api) {}
 
     // Used by on_vkCreateDescriptorPool.
     //
@@ -124,15 +98,41 @@ class VkReconstruction {
     // add them to OP_vkCreateDescriptorPool.
     void createExtraHandlesForNextApi(const uint64_t* created, uint32_t count);
 
+    void addOrderedBoxedHandlesCreatedByCall(VkSnapshotApiCallHandle handle,
+                                             const VkObjectHandle* boxedHandles,
+                                             uint32_t boxedHandlesCount);
+
    private:
+    struct VkSnapshotApiCallInfo {
+        VkSnapshotApiCallHandle handle = kInvalidSnapshotApiCallHandle;
+
+        // Raw packet from VkDecoder.
+        std::vector<uint8_t> packet;
+
+        // Book-keeping for which handles were created by this API
+        std::vector<uint64_t> createdHandles;
+        std::vector<uint64_t> depends;
+
+        // Extra boxed handles created for this API call that are not identifiable
+        // solely from the API parameters itself. For example, the extra boxed `VkQueue`s
+        // that are created during `vkCreateDevice()` can not be identified from the
+        // parameters to `vkCreateDevice()`.
+        //
+        // TODO: remove this and require that all of the `new_boxed_*()` take a
+        // `VkSnapshotApiCallInfo` as an argument so the creation order of the boxed
+        // handles in `createdHandles` is guaranteed to match the replay order. For now,
+        // this relies on careful manual ordering.
+        std::vector<uint64_t> extraCreatedHandles;
+    };
+
     std::vector<uint64_t> getOrderedUniqueModifyApis() const;
 
+    using VkSnapshotApiCallManager = gfxstream::base::EntityManager<32, 16, 16, VkSnapshotApiCallInfo>;
     VkSnapshotApiCallManager mApiCallManager;
 
-    HandleWithStateReconstructions mHandleReconstructions;
-    HandleModifications mHandleModifications;
-
     std::vector<uint8_t> mLoadedTrace;
+
+    DependencyGraph mGraph;
 };
 
 }  // namespace vk

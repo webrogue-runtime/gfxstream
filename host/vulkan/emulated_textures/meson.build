@@ -1,5 +1,5 @@
 # Copyright 2023 Android Open Source Project
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 files_emulated_textures = files(
   'AstcTexture.cpp',
@@ -11,12 +11,37 @@ emulated_texture_args = [
   '-DVK_GFXSTREAM_STRUCTURE_TYPE_EXT'
 ]
 
+if host_machine.system() == 'windows'
+  emulated_texture_args += '-DVK_USE_PLATFORM_WIN32_KHR'
+elif host_machine.system() == 'darwin'
+  emulated_texture_args += '-DVK_USE_PLATFORM_METAL_EXT'
+  emulated_texture_args += '-DVK_USE_PLATFORM_MACOS_MVK'
+endif
+
 lib_emulated_textures = static_library(
   'emulated_textures',
   files_emulated_textures,
   cpp_args: emulated_texture_args + gfxstream_host_args,
-  include_directories: [inc_utils, inc_root, inc_vulkan_headers, inc_vulkan_server,
-                        inc_gfxstream_include, inc_include, inc_cereal_common, inc_stream_servers],
-  link_with: [lib_compressed_textures],
-  dependencies: [aemu_base_dep, aemu_common_dep]
+  include_directories: [
+    inc_cereal_common,
+    inc_common_base,
+    inc_host_compressed_textures,
+    inc_host_decoder_common,
+    inc_host_health,
+    inc_host_include,
+    inc_common_logging,
+    inc_host_metrics,
+    inc_include,
+    inc_root,
+    inc_stream_servers,
+    inc_vulkan_headers,
+    inc_vulkan_server,
+  ],
+  link_with: [
+    lib_common_base,
+    lib_host_compressed_textures,
+    lib_host_health,
+    lib_common_logging,
+    lib_host_metrics,
+  ],
 )

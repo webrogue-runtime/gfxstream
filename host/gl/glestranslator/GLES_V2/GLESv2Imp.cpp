@@ -25,10 +25,13 @@
 #include <GLES2/gl2ext.h>
 #include <GLES3/gl3.h>
 #include <GLES3/gl31.h>
+#include <math.h>
+#include <stdio.h>
 
-#include "aemu/base/system/System.h"
-#include "host-common/logging.h"
+#include <numeric>
+#include <unordered_map>
 
+#include "ANGLEShaderParser.h"
 #include "GLESv2Context.h"
 #include "GLESv2Validate.h"
 #include "GLcommon/FramebufferData.h"
@@ -41,20 +44,11 @@
 #include "SamplerData.h"
 #include "ShaderParser.h"
 #include "TransformFeedbackData.h"
-
-#include "host-common/crash_reporter.h"
-
-#include "ANGLEShaderParser.h"
-
-#include <math.h>
-#include <stdio.h>
-
-#include <numeric>
-#include <unordered_map>
-
+#include "gfxstream/system/System.h"
+#include "gfxstream/common/logging.h"
 
 #ifdef _MSC_VER
-#include "aemu/base/msvc.h"
+#include "gfxstream/msvc.h"
 #else
 #include <sys/time.h>
 #endif
@@ -80,12 +74,12 @@ static void setMaxGlesVersion(GLESVersion version);
 static void deleteGLESContext(GLEScontext* ctx);
 static void setShareGroup(GLEScontext* ctx,ShareGroupPtr grp);
 static GLEScontext* createGLESContext(void);
-static GLEScontext* createGLESxContext(int maj, int min, GlobalNameSpace* globalNameSpace, android::base::Stream* stream);
+static GLEScontext* createGLESxContext(int maj, int min, GlobalNameSpace* globalNameSpace, gfxstream::Stream* stream);
 static __translatorMustCastToProperFunctionPointerType getProcAddressGles2(const char* procName);
 static void preSaveTexture();
 static void postSaveTexture();
-static void saveTexture(SaveableTexture* texture, android::base::Stream* stream,
-                        android::base::SmallVector<unsigned char>* buffer);
+static void saveTexture(SaveableTexture* texture, gfxstream::Stream* stream,
+                        gfxstream::SmallVector<unsigned char>* buffer);
 static SaveableTexture* createTexture(GlobalNameSpace* globalNameSpace,
                                       SaveableTexture::loader_t&& loader);
 static void restoreTexture(SaveableTexture* texture);
@@ -262,7 +256,7 @@ static GLEScontext* createGLESContext() {
     return new GLESv2Context(2, 0, nullptr, nullptr, nullptr);
 }
 static GLEScontext* createGLESxContext(int maj, int min,
-        GlobalNameSpace* globalNameSpace, android::base::Stream* stream) {
+        GlobalNameSpace* globalNameSpace, gfxstream::Stream* stream) {
     return new GLESv2Context(maj, min, globalNameSpace, stream,
             s_eglIface->eglGetGlLibrary());
 }
@@ -374,7 +368,7 @@ static void postSaveTexture() {
     SaveableTexture::postSave();
 }
 
-static void saveTexture(SaveableTexture* texture, android::base::Stream* stream,
+static void saveTexture(SaveableTexture* texture, gfxstream::Stream* stream,
                         SaveableTexture::Buffer* buffer) {
     texture->onSave(stream);
 }
@@ -408,12 +402,7 @@ static void blitFromCurrentReadBufferANDROID(EGLImage image) {
     GET_CTX()
     unsigned int imagehndl = SafeUIntFromPointer(image);
     ImagePtr img = s_eglIface->getEGLImage(imagehndl);
-    if (!img ||
-        !ctx->shareGroup().get()) {
-        // emugl_crash_reporter(
-        //         "FATAL: blitFromCurrentReadBufferANDROID: "
-        //         "image (%p) or share group (%p) not found",
-        //         img.get(), ctx->shareGroup().get());
+    if (!img || !ctx->shareGroup().get()) {
         return;
     }
 
@@ -1155,14 +1144,14 @@ GL_APICALL GLuint GL_APIENTRY glCreateShader(GLenum type){
     if (!shaderParserInitialized) {
         shaderParserInitialized = true;
         sDebugPrintShaders =
-            android::base::getEnvironmentVariable(
+            gfxstream::base::getEnvironmentVariable(
                 "ANDROID_EMUGL_SHADER_PRINT") == "1";
 
+#ifdef USE_ANGLE_SHADER_PARSER
         auto& gl = ctx->dispatcher();
         auto glesMajorVersion = ctx->getMajorVersion();
         auto glesMinorVersion = ctx->getMinorVersion();
 
-#ifdef USE_ANGLE_SHADER_PARSER
         ANGLEShaderParser::BuiltinResourcesEditCallback editCallback =
             [&gl, glesMajorVersion,
              glesMinorVersion](ST_BuiltInResources& res) {
@@ -4612,7 +4601,7 @@ glTestHostDriverPerformance(GLuint count,
 
     uint32_t drawCount = 0;
 
-    auto cpuTimeStart = android::base::cpuTime();
+    auto cpuTimeStart = gfxstream::base::cpuTime();
 
 fprintf(stderr, "%s: transform loc %d\n", __func__, transformLoc);
 fprintf(stderr, "%s: begin count %d\n", __func__, count);
@@ -4625,7 +4614,7 @@ fprintf(stderr, "%s: begin count %d\n", __func__, count);
 
     gl->glFinish();
 
-    auto cpuTime = android::base::cpuTime() - cpuTimeStart;
+    auto cpuTime = gfxstream::base::cpuTime() - cpuTimeStart;
 
     *duration_us = cpuTime.wall_time_us;
     *duration_cpu_us = cpuTime.usageUs();

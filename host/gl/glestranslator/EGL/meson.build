@@ -1,5 +1,5 @@
 # Copyright 2023 Android Open Source Project
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 files_lib_egl_translator = files(
   'ClientAPIExts.cpp',
@@ -52,9 +52,31 @@ lib_egl_translator = static_library(
   'egl_translator',
   files_lib_egl_translator,
   cpp_args: egl_cpp_args + gfxstream_host_args,
-  include_directories: [inc_gfxstream_include, inc_include, inc_gl_common, inc_apigen_codec,
-                        inc_gl_host_common, inc_stream_servers, inc_etc],
-  link_with: [lib_gl_common, lib_apigen_codec, lib_gl_host_common],
-  dependencies: [aemu_base_dep, aemu_common_dep, aemu_snapshot_dep,
-                 aemu_logging_dep]
+  include_directories: [
+    inc_host_decoder_common,
+    inc_common_base,
+    inc_common_utils,
+    inc_etc,
+    inc_gfxstream_server,
+    inc_gl_common,
+    inc_gl_openglesdispatch,
+    inc_host_backend,
+    inc_host_library,
+    inc_common_logging,
+    inc_host_snapshot,
+    inc_include,
+    inc_opengl_headers,
+    inc_stream_servers,
+    inc_x11_headers,
+  ],
+  link_with: [
+    lib_host_decoder_common,
+    lib_common_base,
+    lib_common_utils,
+    lib_gl_common,
+    lib_host_backend,
+    lib_host_library,
+    lib_common_logging,
+    lib_host_snapshot,
+  ],
 )

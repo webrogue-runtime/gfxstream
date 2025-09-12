@@ -123,13 +123,7 @@ class EmulatedEglConfigList {
     // Retrieve the EmulatedEglConfig instance associated with |guestId|,
     // which must be an integer between 0 and |size() - 1|. Returns
     // NULL in case of failure.
-    const EmulatedEglConfig* get(int guestId) const {
-        if (guestId >= 0 && guestId < (int)mConfigs.size()) {
-            return &mConfigs[guestId];
-        } else {
-            return NULL;
-        }
-    }
+    const EmulatedEglConfig* get(int guestId) const;
 
     std::vector<EmulatedEglConfig>::const_iterator begin() const { return mConfigs.begin(); }
     std::vector<EmulatedEglConfig>::const_iterator end() const { return mConfigs.end(); }

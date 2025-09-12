@@ -20,14 +20,12 @@
 #include "OpenGLESDispatch/OpenGLDispatchLoader.h"
 #endif
 
-#include "aemu/base/Metrics.h"
-#include "aemu/base/system/System.h"
-#include "aemu/base/threads/Thread.h"
+#include "gfxstream/Metrics.h"
+#include "gfxstream/system/System.h"
+#include "gfxstream/threads/Thread.h"
 #include "gfxstream/host/Tracing.h"
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/crash_reporter.h"
-#include "host-common/logging.h"
-#include "host-common/sync_device.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/host/sync_device.h"
 
 #ifndef _MSC_VER
 #include <sys/time.h>
@@ -36,9 +34,7 @@
 
 namespace gfxstream {
 
-using android::base::EventHangMetadata;
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
+using gfxstream::base::EventHangMetadata;
 
 #if GFXSTREAM_ENABLE_HOST_GLES
 using gl::EGLDispatch;
@@ -55,9 +51,9 @@ static uint64_t curr_ns() {
     return now_ns.time_since_epoch().count();
 }
 
-#define DPRINT(fmt, ...)                                                   \
-    do {                                                                   \
-        INFO("@ time=%llu, %s: " fmt, curr_ns(), __func__, ##__VA_ARGS__); \
+#define DPRINT(fmt, ...)                                                             \
+    do {                                                                             \
+        GFXSTREAM_INFO("@ time=%llu, %s: " fmt, curr_ns(), __func__, ##__VA_ARGS__); \
     } while (0)
 
 #else
@@ -69,8 +65,7 @@ static uint64_t curr_ns() {
 #define SYNC_THREAD_CHECK(condition)                                        \
     do {                                                                    \
         if (!(condition)) {                                                 \
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) <<              \
-                #condition << " is false";                                  \
+            GFXSTREAM_FATAL(#condition " was false.");                      \
         }                                                                   \
     } while (0)
 
@@ -97,8 +92,8 @@ public:
 private:
     std::unique_ptr<SyncThread> mSyncThread = nullptr;
     // lock for the access to this object
-    android::base::Lock mLock;
-    using AutoLock = android::base::AutoLock;
+    gfxstream::base::Lock mLock;
+    using AutoLock = gfxstream::base::AutoLock;
 };
 
 static GlobalSyncThread* sGlobalSyncThread() {
@@ -110,7 +105,7 @@ static const uint32_t kTimelineInterval = 1;
 static const uint64_t kDefaultTimeoutNsecs = 5ULL * 1000ULL * 1000ULL * 1000ULL;
 
 SyncThread::SyncThread(bool hasGl, HealthMonitor<>* healthMonitor)
-    : android::base::Thread(android::base::ThreadFlags::MaskSignals, 512 * 1024),
+    : gfxstream::base::Thread(gfxstream::base::ThreadFlags::MaskSignals, 512 * 1024),
       mWorkerThreadPool(kNumWorkerThreads,
                         [this](Command&& command, ThreadPool::WorkerId id) {
                             doSyncThreadCmd(std::move(command), id);
@@ -140,7 +135,7 @@ void SyncThread::triggerWait(EmulatedEglFenceSync* fenceSync,
         [fenceSync, timeline, this](WorkerId) {
             doSyncWait(fenceSync, [timeline] {
                 DPRINT("wait done (with fence), use goldfish sync timeline inc");
-                emugl::emugl_sync_timeline_inc(timeline, kTimelineInterval);
+                gfxstream_sync_timeline_inc(timeline, kTimelineInterval);
             });
         },
         ss.str());
@@ -289,7 +284,7 @@ void SyncThread::triggerWaitVk(VkFence vkFence, uint64_t timeline) {
         [vkFence, timeline](WorkerId) {
             doSyncWaitVk(vkFence, [timeline] {
                 DPRINT("vk wait done, use goldfish sync timeline inc");
-                emugl::emugl_sync_timeline_inc(timeline, kTimelineInterval);
+                gfxstream_sync_timeline_inc(timeline, kTimelineInterval);
             });
         },
         ss.str());
@@ -328,12 +323,12 @@ void SyncThread::triggerWaitVkQsri(VkImage vkImage, uint64_t timeline) {
         [vkImage, timeline](WorkerId) {
             auto decoder = vk::VkDecoderGlobalState::get();
             auto res = decoder->registerQsriCallback(vkImage, [timeline](){
-                 emugl::emugl_sync_timeline_inc(timeline, kTimelineInterval);
+                 gfxstream_sync_timeline_inc(timeline, kTimelineInterval);
             });
             // If registerQsriCallback does not schedule the callback, we still need to complete
             // the task, otherwise we may hit deadlocks on tasks on the same ring.
             if (!res.CallbackScheduledOrFired()) {
-                emugl::emugl_sync_timeline_inc(timeline, kTimelineInterval);
+                gfxstream_sync_timeline_inc(timeline, kTimelineInterval);
             }
         },
         ss.str());
@@ -371,7 +366,7 @@ void SyncThread::cleanup() {
     // Wait for the control thread to exit. We can't destroy the SyncThread
     // before we wait the control thread.
     if (!wait(nullptr)) {
-        ERR("Fail to wait the control thread of the SyncThread to exit.");
+        GFXSTREAM_ERROR("Fail to wait the control thread of the SyncThread to exit.");
     }
 }
 

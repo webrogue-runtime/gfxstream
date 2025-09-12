@@ -17,10 +17,10 @@
 #ifndef GLES_CONTEXT_H
 #define GLES_CONTEXT_H
 
-#include "aemu/base/ThreadAnnotations.h"
-#include "aemu/base/containers/Lookup.h"
-#include "aemu/base/files/Stream.h"
-#include "aemu/base/synchronization/Lock.h"
+#include "gfxstream/ThreadAnnotations.h"
+#include "gfxstream/containers/Lookup.h"
+#include "render-utils/stream.h"
+#include "gfxstream/synchronization/Lock.h"
 
 #include "GLDispatch.h"
 #include "GLESpointer.h"
@@ -155,8 +155,8 @@ struct BufferBinding {
     GLintptr stride = 0;
     GLuint divisor = 0;
     bool isBindBase = false;
-    void onLoad(android::base::Stream* stream);
-    void onSave(android::base::Stream* stream) const;
+    void onLoad(gfxstream::Stream* stream);
+    void onSave(gfxstream::Stream* stream) const;
 };
 
 typedef std::vector<GLESpointer> VertexAttribInfoVector;
@@ -172,7 +172,7 @@ struct VAOState {
         everBound(false),
         legacy(arr != nullptr),
         arraysMap(arr) { }
-    VAOState(android::base::Stream* stream);
+    VAOState(gfxstream::Stream* stream);
     GLuint element_array_buffer_binding;
     VertexAttribInfoVector vertexAttribInfo;
     VertexAttribBindingVector bindingState;
@@ -180,7 +180,7 @@ struct VAOState {
     bool everBound;
     bool legacy = false;
     std::unique_ptr<ArraysMap> arraysMap;
-    void onSave(android::base::Stream* stream) const;
+    void onSave(gfxstream::Stream* stream) const;
 };
 
 typedef std::unordered_map<GLuint, VAOState> VAOStateMap;
@@ -247,7 +247,7 @@ private:
 class GLEScontext{
 public:
     GLEScontext();
-    GLEScontext(GlobalNameSpace* globalNameSpace, android::base::Stream* stream,
+    GLEScontext(GlobalNameSpace* globalNameSpace, gfxstream::Stream* stream,
             GlLibrary* glLib);
     virtual void init(bool nativeTextureDecompressionEnabled, bool programBinaryLinkStatusEnabled);
     static void initGlobal(EGLiface* eglIface);
@@ -420,7 +420,7 @@ public:
         m_hints[target] = mode;
     }
     GLenum getHint(GLenum target) const {
-        return android::base::findOrDefault(m_hints, target, GL_DONT_CARE);
+        return gfxstream::base::findOrDefault(m_hints, target, GL_DONT_CARE);
     }
 
     static GLDispatch& dispatcher(){return s_glDispatch;};
@@ -445,7 +445,7 @@ public:
 
     // FBO
     void initFBONameSpace(GlobalNameSpace* globalNameSpace,
-            android::base::Stream* stream);
+            gfxstream::Stream* stream);
     bool isFBO(ObjectLocalName p_localName);
     ObjectLocalName genFBOName(ObjectLocalName p_localName = 0,
             bool genLocal = 0);
@@ -486,10 +486,10 @@ public:
     ObjectLocalName getVAOLocalName(unsigned int p_globalName);
 
     // Snapshot save
-    virtual void onSave(android::base::Stream* stream) const;
-    virtual void postSave(android::base::Stream* stream) const;
+    virtual void onSave(gfxstream::Stream* stream) const;
+    virtual void postSave(gfxstream::Stream* stream) const;
     virtual ObjectDataPtr loadObject(NamedObjectType type,
-            ObjectLocalName localName, android::base::Stream* stream) const;
+            ObjectLocalName localName, gfxstream::Stream* stream) const;
     // postLoad is triggered after setting up ShareGroup
     virtual void postLoad();
     virtual void restore();
@@ -538,7 +538,7 @@ protected:
     virtual void initExtensionString() =0;
 
     bool                  m_needRestoreFromSnapshot = false;
-    static android::base::Lock   s_lock;
+    static gfxstream::base::Lock   s_lock;
     static GLDispatch     s_glDispatch;
     bool                  m_initialized = false;
     unsigned int          m_activeTexture = 0;

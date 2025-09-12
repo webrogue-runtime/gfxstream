@@ -20,10 +20,7 @@
 #include "GLESVersionDetector.h"
 #include "OpenGLESDispatch/EGLDispatch.h"
 #include "OpenGLESDispatch/GLESv1Dispatch.h"
-#include "aemu/base/containers/SmallVector.h"
-#include "host-common/feature_control.h"
-#include "host-common/logging.h"
-#include "host-common/misc.h"
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 namespace gl {
@@ -43,7 +40,7 @@ std::unique_ptr<EmulatedEglContext> EmulatedEglContext::createImpl(
         EGLContext sharedContext,
         HandleType hndl,
         GLESApi version,
-        android::base::Stream* stream) {
+        gfxstream::Stream* stream) {
     GLESApi clientVersion = version;
     int majorVersion = clientVersion;
     int minorVersion = 0;
@@ -56,7 +53,7 @@ std::unique_ptr<EmulatedEglContext> EmulatedEglContext::createImpl(
         minorVersion = 1;
     }
 
-    android::base::SmallFixedVector<EGLint, 7> contextAttribs = {
+    std::vector<EGLint> contextAttribs = {
         EGL_CONTEXT_CLIENT_VERSION, majorVersion,
         EGL_CONTEXT_MINOR_VERSION_KHR, minorVersion,
     };
@@ -76,7 +73,7 @@ std::unique_ptr<EmulatedEglContext> EmulatedEglContext::createImpl(
             display, config, sharedContext, &contextAttribs[0]);
     }
     if (context == EGL_NO_CONTEXT) {
-        ERR("Failed to create context (EGL_NO_CONTEXT result)");
+        GFXSTREAM_ERROR("Failed to create context (EGL_NO_CONTEXT result)");
         return nullptr;
     }
 
@@ -101,7 +98,7 @@ EmulatedEglContext::~EmulatedEglContext() {
     }
 }
 
-void EmulatedEglContext::onSave(android::base::Stream* stream) {
+void EmulatedEglContext::onSave(gfxstream::Stream* stream) {
     stream->putBe32(mHndl);
     stream->putBe32(static_cast<uint32_t>(mVersion));
     assert(s_egl.eglCreateContext);
@@ -111,7 +108,7 @@ void EmulatedEglContext::onSave(android::base::Stream* stream) {
 }
 
 std::unique_ptr<EmulatedEglContext> EmulatedEglContext::onLoad(
-        android::base::Stream* stream,
+        gfxstream::Stream* stream,
         EGLDisplay display) {
     HandleType hndl = static_cast<HandleType>(stream->getBe32());
     GLESApi version = static_cast<GLESApi>(stream->getBe32());

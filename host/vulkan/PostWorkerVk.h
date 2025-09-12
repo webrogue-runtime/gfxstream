@@ -17,7 +17,7 @@
 
 #include <future>
 
-#include "DisplaySurfaceUser.h"
+#include "gfxstream/host/display_surface_user.h"
 #include "PostWorker.h"
 
 namespace gfxstream {
@@ -29,9 +29,6 @@ class DisplayVk;
 class PostWorkerVk : public PostWorker {
    public:
     PostWorkerVk(FrameBuffer* fb, Compositor* compositor, vk::DisplayVk* displayGl);
-
-    void screenshot(ColorBuffer* cb, int screenwidth, int screenheight, GLenum format, GLenum type,
-                    int skinRotation, void* pixels, Rect rect) override;
 
    protected:
     std::shared_future<void> postImpl(ColorBuffer* cb) override;

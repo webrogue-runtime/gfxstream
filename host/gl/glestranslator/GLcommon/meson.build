@@ -1,5 +1,5 @@
 # Copyright 2023 Android Open Source Project
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 files_lib_gl_common = files(
   'rgtc.cpp',
@@ -27,7 +27,29 @@ lib_gl_common = static_library(
   'gl_common',
   files_lib_gl_common,
   cpp_args: gfxstream_host_args,
-  include_directories: [inc_etc, inc_gfxstream_include, inc_include, inc_stream_servers, inc_gl_common],
-  link_with: [lib_compressed_textures, lib_etc],
-  dependencies: [aemu_base_dep, aemu_logging_dep, aemu_snapshot_dep]
+  include_directories: [
+    inc_common_base,
+    inc_common_opengl,
+    inc_etc,
+    inc_gfxstream_server,
+    inc_gl_common,
+    inc_gl_openglesdispatch,
+    inc_host_backend,
+    inc_host_compressed_textures,
+    inc_host_decoder_common,
+    inc_host_library,
+    inc_common_logging,
+    inc_host_snapshot,
+    inc_include,
+    inc_stream_servers,
+  ],
+  link_with: [
+    lib_common_base,
+    lib_host_compressed_textures,
+    lib_etc,
+    lib_host_backend,
+    lib_host_library,
+    lib_common_logging,
+    lib_host_snapshot,
+  ],
 )

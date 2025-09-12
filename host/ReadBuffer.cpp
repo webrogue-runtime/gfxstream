@@ -15,13 +15,13 @@
 */
 #include "ReadBuffer.h"
 
-#include "host-common/logging.h"
+#include <assert.h>
+#include <limits.h>
+#include <string.h>
 
 #include <algorithm>
 
-#include <assert.h>
-#include <string.h>
-#include <limits.h>
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 
@@ -70,7 +70,7 @@ int ReadBuffer::getData(IOStream* stream, size_t minSize) {
 
             const auto new_buf = (unsigned char*)malloc(new_size);
             if (!new_buf) {
-                ERR("Failed to alloc %zu bytes for ReadBuffer\n", new_size);
+                GFXSTREAM_ERROR("Failed to alloc %zu bytes for ReadBuffer\n", new_size);
                 return -1;
             }
 
@@ -111,13 +111,13 @@ void ReadBuffer::consume(size_t amount) {
     m_readPtr += amount;
 }
 
-void ReadBuffer::onSave(android::base::Stream* stream) {
+void ReadBuffer::onSave(gfxstream::Stream* stream) {
     stream->putBe32(m_size);
     stream->putBe32(m_validData);
     stream->write(m_readPtr, m_validData);
 }
 
-void ReadBuffer::onLoad(android::base::Stream* stream) {
+void ReadBuffer::onLoad(gfxstream::Stream* stream) {
     const auto size = stream->getBe32();
     if (size > m_size) {
         m_size = size;

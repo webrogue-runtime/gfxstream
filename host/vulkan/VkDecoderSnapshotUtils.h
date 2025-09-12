@@ -26,13 +26,18 @@ struct StateBlock {
     VkQueue queue;
     VkCommandPool commandPool;
 };
-void saveImageContent(android::base::Stream* stream, StateBlock* stateBlock, VkImage image,
+void saveImageContent(gfxstream::Stream* stream, StateBlock* stateBlock, VkImage image,
                       const ImageInfo* imageInfo);
-void loadImageContent(android::base::Stream* stream, StateBlock* stateBlock, VkImage image,
+void loadImageContent(gfxstream::Stream* stream, StateBlock* stateBlock, VkImage image,
                       const ImageInfo* imageInfo);
-void saveBufferContent(android::base::Stream* stream, StateBlock* stateBlock, VkBuffer buffer,
+void saveBufferContent(gfxstream::Stream* stream, StateBlock* stateBlock, VkBuffer buffer,
                        const BufferInfo* bufferInfo);
-void loadBufferContent(android::base::Stream* stream, StateBlock* stateBlock, VkBuffer buffer,
+
+void setEventInQueue(StateBlock* stateBlock, VkEvent event, uint64_t eventflags);
+
+void signalSemaphore(StateBlock* stateBlock, VkSemaphore unboxed_semaphore);
+
+void loadBufferContent(gfxstream::Stream* stream, StateBlock* stateBlock, VkBuffer buffer,
                        const BufferInfo* bufferInfo);
 }  // namespace vk
 }  // namespace gfxstream

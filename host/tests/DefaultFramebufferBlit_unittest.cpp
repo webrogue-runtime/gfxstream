@@ -13,11 +13,12 @@
 // limitations under the License.
 #include <gtest/gtest.h>
 
-#include "host-common/testing/MockGraphicsAgentFactory.h"
-#include "Standalone.h"
-#include "GLTestUtils.h"
-
 #include <memory>
+
+#include "FrameBuffer.h"
+#include "OpenGLESDispatch/OpenGLDispatchLoader.h"
+#include "gfxstream/host/testing/GLTestUtils.h"
+#include "gfxstream/host/testing/SampleApplication.h"
 
 namespace gfxstream {
 namespace {
@@ -182,14 +183,7 @@ static constexpr float kDrawColorRed[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
 static constexpr float kDrawColorGreen[4] = { 0.0f, 1.0f, 0.0f, 1.0f };
 
 class CombinedFramebufferBlit : public ::testing::Test, public ::testing::WithParamInterface<ClearColorParam> {
-protected:
-    static void SetUpTestSuite() {
-        android::emulation::injectGraphicsAgents(
-                android::emulation::MockGraphicsAgentFactory());
-    }
-
-    static void TearDownTestSuite() { }
-
+  protected:
     virtual void SetUp() override {
         mApp.reset(new ClearColor(GetParam()));
     }

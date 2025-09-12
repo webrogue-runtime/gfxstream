@@ -20,13 +20,13 @@
 #include <variant>
 
 #include "FrameBuffer.h"
-#include "GraphicsDriverLock.h"
+#include "gfxstream/host/graphics_driver_lock.h"
 #include "RenderChannelImpl.h"
 #include "RenderThread.h"
-#include "aemu/base/system/System.h"
-#include "aemu/base/threads/WorkerThread.h"
-#include "host-common/logging.h"
-#include "snapshot/common.h"
+#include "gfxstream/system/System.h"
+#include "gfxstream/threads/WorkerThread.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/host/renderer_operations.h"
 
 #if GFXSTREAM_ENABLE_HOST_GLES
 #include "gl/EmulatedEglFenceSync.h"
@@ -63,7 +63,7 @@ class RendererImpl::ProcessCleanupThread {
 public:
     ProcessCleanupThread()
         : mCleanupWorker([](Cmd cmd) {
-            using android::base::WorkerProcessingResult;
+            using gfxstream::base::WorkerProcessingResult;
             struct {
                 WorkerProcessingResult operator()(CleanProcessResources resources) {
                     FrameBuffer::getFB()->cleanupProcGLObjects(resources.puid);
@@ -108,7 +108,7 @@ private:
     using Cmd = std::variant<CleanProcessResources, Exit>;
     DISALLOW_COPY_AND_ASSIGN(ProcessCleanupThread);
 
-    android::base::WorkerThread<Cmd> mCleanupWorker;
+    gfxstream::base::WorkerThread<Cmd> mCleanupWorker;
 };
 
 RendererImpl::RendererImpl() {
@@ -125,35 +125,25 @@ RendererImpl::~RendererImpl() {
     mRenderWindow.reset();
 }
 
-bool RendererImpl::initialize(int width, int height, gfxstream::host::FeatureSet features,
-                              bool useSubWindow, bool egl2egl) {
-#ifdef CONFIG_AEMU
-    if (android::base::getEnvironmentVariable("ANDROID_EMUGL_VERBOSE") == "1") {
-        set_gfxstream_enable_verbose_logs();
-    }
-    if (android::base::getEnvironmentVariable("ANDROID_EMUGL_LOG_COLORS") == "1") {
-        set_gfxstream_enable_log_colors();
-    }
-#endif
-
+bool RendererImpl::initialize(int width, int height, const gfxstream::host::FeatureSet& features,
+                              bool useSubWindow) {
     if (mRenderWindow) {
         return false;
     }
 
     std::unique_ptr<RenderWindow> renderWindow(new RenderWindow(
-            width, height, features, kUseSubwindowThread, useSubWindow, egl2egl));
+            width, height, features, kUseSubwindowThread, useSubWindow));
     if (!renderWindow) {
-        ERR("Could not create rendering window class\n");
-        GL_LOG("Could not create rendering window class");
+        GFXSTREAM_ERROR("Could not create rendering window class");
         return false;
     }
     if (!renderWindow->isValid()) {
-        ERR("Could not initialize emulated framebuffer\n");
+        GFXSTREAM_ERROR("Could not initialize emulated framebuffer\n");
         return false;
     }
 
     mRenderWindow = std::move(renderWindow);
-    GL_LOG("OpenGL renderer initialized successfully");
+    GFXSTREAM_DEBUG("OpenGL renderer initialized successfully");
 
     // This render thread won't do anything but will only preload resources
     // for the real threads to start faster.
@@ -164,7 +154,7 @@ bool RendererImpl::initialize(int width, int height, gfxstream::host::FeatureSet
 }
 
 void RendererImpl::stop(bool wait) {
-    android::base::AutoLock lock(mChannelsLock);
+    std::unique_lock<std::mutex> lock(mChannelsMutex);
     mStopped = true;
     auto channels = std::move(mChannels);
     lock.unlock();
@@ -190,7 +180,7 @@ void RendererImpl::stop(bool wait) {
     for (const auto& c : mStoppedChannels) {
         c->renderThread()->waitForFinished();
         {
-            android::base::AutoLock driverLock(*graphicsDriverLock());
+            gfxstream::base::AutoLock driverLock(*graphicsDriverLock());
             c->renderThread()->sendExitSignal();
             c->renderThread()->wait();
         }
@@ -206,18 +196,18 @@ void RendererImpl::stop(bool wait) {
 
 void RendererImpl::finish() {
     {
-        android::base::AutoLock lock(mChannelsLock);
+        std::lock_guard<std::mutex> lock(mChannelsMutex);
         mRenderWindow->setPaused(true);
     }
     cleanupRenderThreads();
     {
-        android::base::AutoLock lock(mChannelsLock);
+        std::lock_guard<std::mutex> lock(mChannelsMutex);
         mRenderWindow->setPaused(false);
     }
 }
 
 void RendererImpl::cleanupRenderThreads() {
-    android::base::AutoLock lock(mChannelsLock);
+    std::unique_lock<std::mutex> lock(mChannelsMutex);
     const auto channels = std::move(mChannels);
     assert(mChannels.empty());
     lock.unlock();
@@ -231,7 +221,7 @@ void RendererImpl::cleanupRenderThreads() {
     for (const auto& c : channels) {
         c->renderThread()->waitForFinished();
         {
-            android::base::AutoLock driverLock(*graphicsDriverLock());
+            gfxstream::base::AutoLock driverLock(*graphicsDriverLock());
             c->renderThread()->sendExitSignal();
             c->renderThread()->wait();
         }
@@ -246,11 +236,11 @@ void RendererImpl::waitForProcessCleanup() {
 }
 
 RenderChannelPtr RendererImpl::createRenderChannel(
-        android::base::Stream* loadStream, uint32_t virtioGpuContextId) {
+        gfxstream::Stream* loadStream, uint32_t virtioGpuContextId) {
     const auto channel =
         std::make_shared<RenderChannelImpl>(loadStream, virtioGpuContextId);
     {
-        android::base::AutoLock lock(mChannelsLock);
+        std::lock_guard<std::mutex> lock(mChannelsMutex);
 
         if (mStopped) {
             return nullptr;
@@ -271,8 +261,8 @@ RenderChannelPtr RendererImpl::createRenderChannel(
             mLoaderRenderThread.reset();
         }
 
-        GL_LOG("Started new RenderThread (total %" PRIu64 ") @%p",
-               static_cast<uint64_t>(mChannels.size()), channel->renderThread());
+        GFXSTREAM_DEBUG("Started new RenderThread (total %" PRIu64 ") @%p",
+                        static_cast<uint64_t>(mChannels.size()), channel->renderThread());
     }
 
     return channel;
@@ -287,15 +277,10 @@ void RendererImpl::removeListener(FrameBufferChangeEventListener* listener) {
 }
 
 void* RendererImpl::addressSpaceGraphicsConsumerCreate(
-    struct asg_context context,
-    android::base::Stream* loadStream,
-    android::emulation::asg::ConsumerCallbacks callbacks,
-    uint32_t contextId, uint32_t capsetId,
-    std::optional<std::string> nameOpt) {
-    auto thread = new RenderThread(context, loadStream, callbacks, contextId,
-                                   capsetId, std::move(nameOpt));
+        const AsgConsumerCreateInfo& info, gfxstream::Stream* loadStream) {
+    auto thread = new RenderThread(info, loadStream);
     thread->start();
-    android::base::AutoLock lock(mAddressSpaceRenderThreadLock);
+    std::lock_guard<std::mutex> lock(mAddressSpaceRenderThreadMutex);
     mAddressSpaceRenderThreads.emplace(thread);
     return (void*)thread;
 }
@@ -303,13 +288,13 @@ void* RendererImpl::addressSpaceGraphicsConsumerCreate(
 void RendererImpl::addressSpaceGraphicsConsumerDestroy(void* consumer) {
     RenderThread* thread = (RenderThread*)consumer;
     {
-        android::base::AutoLock lock(mAddressSpaceRenderThreadLock);
+        std::lock_guard<std::mutex> lock(mAddressSpaceRenderThreadMutex);
         mAddressSpaceRenderThreads.erase(thread);
     }
 
     thread->waitForFinished();
     {
-        android::base::AutoLock driverLock(*graphicsDriverLock());
+        gfxstream::base::AutoLock driverLock(*graphicsDriverLock());
         thread->sendExitSignal();
         thread->wait();
     }
@@ -321,7 +306,7 @@ void RendererImpl::addressSpaceGraphicsConsumerPreSave(void* consumer) {
     thread->pausePreSnapshot();
 }
 
-void RendererImpl::addressSpaceGraphicsConsumerSave(void* consumer, android::base::Stream* stream) {
+void RendererImpl::addressSpaceGraphicsConsumerSave(void* consumer, gfxstream::Stream* stream) {
     RenderThread* thread = (RenderThread*)consumer;
     thread->save(stream);
 }
@@ -336,9 +321,14 @@ void RendererImpl::addressSpaceGraphicsConsumerRegisterPostLoadRenderThread(void
     mAdditionalPostLoadRenderThreads.push_back(thread);
 }
 
+void RendererImpl::addressSpaceGraphicsConsumerReloadRingConfig(void* consumer) {
+    RenderThread* thread = (RenderThread*)consumer;
+    thread->addressSpaceGraphicsReloadRingConfig();
+}
+
 void RendererImpl::pauseAllPreSave() {
     {
-        android::base::AutoLock lock(mChannelsLock);
+        std::lock_guard<std::mutex> lock(mChannelsMutex);
         if (mStopped) {
             return;
         }
@@ -347,7 +337,7 @@ void RendererImpl::pauseAllPreSave() {
         }
     }
     {
-        android::base::AutoLock lock(mAddressSpaceRenderThreadLock);
+        std::lock_guard<std::mutex> lock(mAddressSpaceRenderThreadMutex);
         for (const auto& thread : mAddressSpaceRenderThreads) {
             thread->pausePreSnapshot();
         }
@@ -357,13 +347,13 @@ void RendererImpl::pauseAllPreSave() {
 
 void RendererImpl::resumeAll() {
     {
-        android::base::AutoLock lock(mAddressSpaceRenderThreadLock);
+        std::lock_guard<std::mutex> lock(mAddressSpaceRenderThreadMutex);
         for (const auto t : mAdditionalPostLoadRenderThreads) {
             t->resume();
         }
     }
     {
-        android::base::AutoLock lock(mChannelsLock);
+        std::lock_guard<std::mutex> lock(mChannelsMutex);
         if (mStopped) {
             return;
         }
@@ -379,8 +369,8 @@ void RendererImpl::resumeAll() {
     repaintOpenGLDisplay();
 }
 
-void RendererImpl::save(android::base::Stream* stream,
-                        const android::snapshot::ITextureSaverPtr& textureSaver) {
+void RendererImpl::save(gfxstream::Stream* stream,
+                        const ITextureSaverPtr& textureSaver) {
     stream->putByte(mStopped);
     if (mStopped) {
         return;
@@ -390,17 +380,17 @@ void RendererImpl::save(android::base::Stream* stream,
     fb->onSave(stream, textureSaver);
 }
 
-bool RendererImpl::load(android::base::Stream* stream,
-                        const android::snapshot::ITextureLoaderPtr& textureLoader) {
+bool RendererImpl::load(gfxstream::Stream* stream,
+                        const ITextureLoaderPtr& textureLoader) {
 
 #ifdef SNAPSHOT_PROFILE
-    android::base::System::Duration startTime =
-            android::base::System::get()->getUnixTimeUs();
+    gfxstream::base::System::Duration startTime =
+            gfxstream::base::System::get()->getUnixTimeUs();
 #endif
     waitForProcessCleanup();
 #ifdef SNAPSHOT_PROFILE
     printf("Previous session cleanup time: %lld ms\n",
-           (long long)(android::base::System::get()
+           (long long)(gfxstream::base::System::get()
                                ->getUnixTimeUs() -
                        startTime) /
                    1000);
@@ -551,7 +541,7 @@ void RendererImpl::resetGuestPostedAFrame() {
     }
 }
 
-void RendererImpl::setScreenMask(int width, int height, const unsigned char* rgbaData) {
+void RendererImpl::setScreenMask(int width, int height, const uint8_t* rgbaData) {
     assert(mRenderWindow);
     mRenderWindow->setScreenMask(width, height, rgbaData);
 }
@@ -675,32 +665,13 @@ struct AndroidVirtioGpuOps* RendererImpl::getVirtioGpuOps() {
     return &sVirtioGpuOps;
 }
 
-void RendererImpl::snapshotOperationCallback(int op, int stage) {
-    using namespace android::snapshot;
-    switch (op) {
-        case SNAPSHOTTER_OPERATION_LOAD:
-            if (stage == SNAPSHOTTER_STAGE_START) {
-#ifdef SNAPSHOT_PROFILE
-             android::base::System::Duration startTime =
-                     android::base::System::get()->getUnixTimeUs();
-#endif
-                mRenderWindow->setPaused(true);
-                cleanupRenderThreads();
-#ifdef SNAPSHOT_PROFILE
-                printf("Previous session suspend time: %lld ms\n",
-                       (long long)(android::base::System::get()
-                                           ->getUnixTimeUs() -
-                                   startTime) /
-                               1000);
-#endif
-            }
-            if (stage == SNAPSHOTTER_STAGE_END) {
-                mRenderWindow->setPaused(false);
-            }
-            break;
-        default:
-            break;
-    }
+void RendererImpl::preLoad() {
+    mRenderWindow->setPaused(true);
+    cleanupRenderThreads();
+}
+
+void RendererImpl::postLoad() {
+    mRenderWindow->setPaused(false);
 }
 
 void RendererImpl::setVsyncHz(int vsyncHz) {
@@ -736,6 +707,14 @@ const void* RendererImpl::getGles2Dispatch() {
 #else
     return nullptr;
 #endif
+}
+
+void RendererImpl::setShouldSkipDraw(bool skip) {
+    set_gfxstream_should_skip_draw(skip);
+}
+
+bool RendererImpl::getShouldSkipDraw() const {
+    return get_gfxstream_should_skip_draw();
 }
 
 }  // namespace gfxstream

@@ -22,9 +22,9 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
-#include "aemu/base/Compiler.h"
-#include "aemu/base/files/Stream.h"
-#include "aemu/base/synchronization/Lock.h"
+#include "gfxstream/Compiler.h"
+#include "render-utils/stream.h"
+#include "gfxstream/synchronization/Lock.h"
 
 namespace gfxstream {
 namespace gl {
@@ -136,8 +136,8 @@ class EmulatedEglFenceSync {
     static EmulatedEglFenceSync* getFromHandle(uint64_t handle);
 
     // Functions for snapshotting all fence state at once
-    static void onSave(android::base::Stream* stream);
-    static void onLoad(android::base::Stream* stream);
+    static void onSave(gfxstream::Stream* stream);
+    static void onLoad(gfxstream::Stream* stream);
 
   private:
     EmulatedEglFenceSync(EGLDisplay display,

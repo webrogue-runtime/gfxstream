@@ -22,14 +22,14 @@ namespace vk {
 namespace {
 
 struct ReadStreamRegistry {
-    android::base::Lock mLock;
+    gfxstream::base::Lock mLock;
 
     std::vector<VulkanMemReadingStream*> freeStreams;
 
     ReadStreamRegistry() { freeStreams.reserve(100); };
 
     VulkanMemReadingStream* pop(const gfxstream::host::FeatureSet& features) {
-        android::base::AutoLock lock(mLock);
+        gfxstream::base::AutoLock lock(mLock);
         if (freeStreams.empty()) {
             return new VulkanMemReadingStream(nullptr, features);
         } else {
@@ -40,7 +40,7 @@ struct ReadStreamRegistry {
     }
 
     void push(VulkanMemReadingStream* stream) {
-        android::base::AutoLock lock(mLock);
+        gfxstream::base::AutoLock lock(mLock);
         freeStreams.push_back(stream);
     }
 };
@@ -61,6 +61,11 @@ void BoxedHandleManager::clear() {
     std::lock_guard<std::mutex> lock(mMutex);
     mReverseMap.clear();
     mStore.clear();
+}
+
+uint64_t BoxedHandleManager::getHandlesCount() const {
+    std::lock_guard<std::mutex> lock(mMutex);
+    return mReverseMap.size();
 }
 
 BoxedHandle BoxedHandleManager::add(const BoxedHandleInfo& item, BoxedHandleTypeTag tag) {
@@ -414,16 +419,11 @@ VkObjectT unbox_VkType(VkObjectT boxed) {
                           std::is_same_v<VkObjectT, VkInstance> ||
                           std::is_same_v<VkObjectT, VkPhysicalDevice> ||
                           std::is_same_v<VkObjectT, VkQueue>) {
-                ERR("Failed to unbox %s %p", GetTypeStr<VkObjectT>(), boxed);
+                GFXSTREAM_ERROR("Failed to unbox %s %p", GetTypeStr<VkObjectT>(), boxed);
             } else if constexpr (std::is_same_v<VkObjectT, VkFence>) {
                 // TODO: investigate.
             } else {
-                GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                        << "Failed to unbox "
-                        << GetTypeStr<VkObjectT>()
-                        << " "
-                        << boxed
-                        << ", not found.";
+                GFXSTREAM_FATAL("Failed to unbox %s %p", GetTypeStr<VkObjectT>(), boxed);
             }
             unboxed = VK_NULL_HANDLE;
         } else {
@@ -452,7 +452,7 @@ VkObjectT try_unbox_VkType(VkObjectT boxed) {
     }
 
     if (unboxed == VK_NULL_HANDLE) {
-        WARN("Failed to try unbox %s %p", GetTypeStr<VkObjectT>(), boxed);
+        GFXSTREAM_WARNING("Failed to try unbox %s %p", GetTypeStr<VkObjectT>(), boxed);
     }
 
     return unboxed;
@@ -508,7 +508,7 @@ template <typename VkObjectT>
 VulkanDispatch* get_dispatch_VkType(VkObjectT boxed) {
     BoxedHandleInfo* info = sBoxedHandleManager.get((uint64_t)(uintptr_t)boxed);
     if (info == nullptr) {
-        ERR("Failed to unbox %s %p", GetTypeStr<VkObjectT>(), boxed);
+        GFXSTREAM_ERROR("Failed to unbox %s %p", GetTypeStr<VkObjectT>(), boxed);
         return nullptr;
     }
     return info->dispatch;

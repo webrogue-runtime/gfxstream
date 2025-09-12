@@ -15,23 +15,26 @@
 */
 
 #include "GLEScmContext.h"
-#include "GLEScmUtils.h"
+
 #include <algorithm>
-#include <GLcommon/GLutils.h>
-#include <GLcommon/GLconversion_macros.h>
+#include <array>
 #include <string.h>
+#include <vector>
+
 #include <GLES/gl.h>
 #include <GLES/glext.h>
-
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/files/StreamSerializing.h"
-#include "host-common/crash_reporter.h"
-#include "GLEScmValidate.h"
 
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+
+#include "GLEScmValidate.h"
+#include "GLEScmUtils.h"
+#include "GLcommon/GLutils.h"
+#include "GLcommon/GLconversion_macros.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/host/stream_utils.h"
 
 static GLESVersion s_maxGlesVersion = GLES_1_1;
 
@@ -40,7 +43,7 @@ void GLEScmContext::setMaxGlesVersion(GLESVersion version) {
 }
 
 void GLEScmContext::init(bool nativeTextureDecompressionEnabled, bool programBinaryLinkStatusEnabled) {
-    android::base::AutoLock mutex(s_lock);
+    gfxstream::base::AutoLock mutex(s_lock);
     if(!m_initialized) {
         GLEScontext::init(nativeTextureDecompressionEnabled, programBinaryLinkStatusEnabled);
 
@@ -97,24 +100,24 @@ void GLEScmContext::initDefaultFBO(
 }
 
 GLEScmContext::GLEScmContext(int maj, int min,
-        GlobalNameSpace* globalNameSpace, android::base::Stream* stream)
+        GlobalNameSpace* globalNameSpace, gfxstream::Stream* stream)
     : GLEScontext(globalNameSpace, stream, nullptr) {
     if (stream) {
         assert(maj == m_glesMajorVersion);
         assert(min == m_glesMinorVersion);
-        android::base::loadBuffer(stream, &mProjMatrices);
-        android::base::loadBuffer(stream, &mModelviewMatrices);
-        android::base::loadBuffer(stream, &mTextureMatrices,
-                [](android::base::Stream* stream) {
+        gfxstream::loadBuffer(stream, &mProjMatrices);
+        gfxstream::loadBuffer(stream, &mModelviewMatrices);
+        gfxstream::loadBuffer(stream, &mTextureMatrices,
+                [](gfxstream::Stream* stream) {
                     MatrixStack matrices;
-                    android::base::loadBuffer(stream, &matrices);
+                    gfxstream::loadBuffer(stream, &matrices);
                     return matrices;
                 });
-        android::base::loadBuffer(stream, &mTexUnitEnvs,
-                [](android::base::Stream* stream) {
+        gfxstream::loadBuffer(stream, &mTexUnitEnvs,
+                [](gfxstream::Stream* stream) {
                     TexEnv texEnv;
-                    android::base::loadCollection(stream, &texEnv,
-                            [] (android::base::Stream* stream) {
+                    gfxstream::loadCollection(stream, &texEnv,
+                            [] (gfxstream::Stream* stream) {
                                 GLenum idx = stream->getBe32();
                                 GLValTyped val;
                                 stream->read(&val, sizeof(GLValTyped));
@@ -122,11 +125,11 @@ GLEScmContext::GLEScmContext(int maj, int min,
                             });
                     return texEnv;
                 });
-        android::base::loadBuffer(stream, &mTexGens,
-                [](android::base::Stream* stream) {
+        gfxstream::loadBuffer(stream, &mTexGens,
+                [](gfxstream::Stream* stream) {
                     TexEnv texEnv;
-                    android::base::loadCollection(stream, &texEnv,
-                            [] (android::base::Stream* stream) {
+                    gfxstream::loadCollection(stream, &texEnv,
+                            [] (gfxstream::Stream* stream) {
                                 GLenum idx = stream->getBe32();
                                 GLValTyped val;
                                 stream->read(&val, sizeof(GLValTyped));
@@ -148,11 +151,11 @@ GLEScmContext::GLEScmContext(int maj, int min,
                     &m_texCoords[m_clientActiveTexture];
         }
 
-        android::base::loadBufferPtr<GLVal>(stream, mMultiTexCoord);
-        android::base::loadBufferPtr<Material>(stream, &mMaterial);
-        android::base::loadBufferPtr<LightModel>(stream, &mLightModel);
-        android::base::loadBufferPtr<Light>(stream, mLights);
-        android::base::loadBufferPtr<Fog>(stream, &mFog);
+        gfxstream::loadBufferPtr<GLVal>(stream, mMultiTexCoord);
+        gfxstream::loadBufferPtr<Material>(stream, &mMaterial);
+        gfxstream::loadBufferPtr<LightModel>(stream, &mLightModel);
+        gfxstream::loadBufferPtr<Light>(stream, mLights);
+        gfxstream::loadBufferPtr<Fog>(stream, &mFog);
 
     } else {
         m_glesMajorVersion = maj;
@@ -235,27 +238,27 @@ const GLEScmContext::Fog& GLEScmContext::getFogInfo() {
     return mFog;
 }
 
-void GLEScmContext::onSave(android::base::Stream* stream) const {
+void GLEScmContext::onSave(gfxstream::Stream* stream) const {
     GLEScontext::onSave(stream);
-    android::base::saveBuffer(stream, mProjMatrices);
-    android::base::saveBuffer(stream, mModelviewMatrices);
-    android::base::saveBuffer(stream, mTextureMatrices,
-            [](android::base::Stream* stream, const MatrixStack& matrices) {
-                android::base::saveBuffer(stream, matrices);
+    gfxstream::saveBuffer(stream, mProjMatrices);
+    gfxstream::saveBuffer(stream, mModelviewMatrices);
+    gfxstream::saveBuffer(stream, mTextureMatrices,
+            [](gfxstream::Stream* stream, const MatrixStack& matrices) {
+                gfxstream::saveBuffer(stream, matrices);
             });
-    android::base::saveBuffer(stream, mTexUnitEnvs,
-            [](android::base::Stream* stream, const TexEnv& texEnv) {
-                android::base::saveCollection(stream, texEnv,
-                        [] (android::base::Stream* stream,
+    gfxstream::saveBuffer(stream, mTexUnitEnvs,
+            [](gfxstream::Stream* stream, const TexEnv& texEnv) {
+                gfxstream::saveCollection(stream, texEnv,
+                        [] (gfxstream::Stream* stream,
                             const std::pair<GLenum, GLValTyped>& it) {
                             stream->putBe32(it.first);
                             stream->write(&it.second, sizeof(GLValTyped));
                         });
             });
-    android::base::saveBuffer(stream, mTexGens,
-            [](android::base::Stream* stream, const TexEnv& texEnv) {
-                android::base::saveCollection(stream, texEnv,
-                        [] (android::base::Stream* stream,
+    gfxstream::saveBuffer(stream, mTexGens,
+            [](gfxstream::Stream* stream, const TexEnv& texEnv) {
+                gfxstream::saveCollection(stream, texEnv,
+                        [] (gfxstream::Stream* stream,
                             const std::pair<GLenum, GLValTyped>& it) {
                             stream->putBe32(it.first);
                             stream->write(&it.second, sizeof(GLValTyped));
@@ -272,11 +275,11 @@ void GLEScmContext::onSave(android::base::Stream* stream) const {
         }
     }
 
-    android::base::saveBuffer<GLVal>(stream, mMultiTexCoord, kMaxTextureUnits);
-    android::base::saveBuffer<Material>(stream, &mMaterial, 1);
-    android::base::saveBuffer<LightModel>(stream, &mLightModel, 1);
-    android::base::saveBuffer<Light>(stream, mLights, kMaxLights);
-    android::base::saveBuffer<Fog>(stream, &mFog, 1);
+    gfxstream::saveBuffer<GLVal>(stream, mMultiTexCoord, kMaxTextureUnits);
+    gfxstream::saveBuffer<Material>(stream, &mMaterial, 1);
+    gfxstream::saveBuffer<LightModel>(stream, &mLightModel, 1);
+    gfxstream::saveBuffer<Light>(stream, mLights, kMaxLights);
+    gfxstream::saveBuffer<Fog>(stream, &mFog, 1);
 }
 
 void GLEScmContext::restoreMatrixStack(const MatrixStack& matrices) {
@@ -1669,8 +1672,6 @@ void GLEScmContext::drawTexOES(float x, float y, float z, float width, float hei
             static_cast<float>(x+width), static_cast<float>(y+height), z,
             static_cast<float>(x+width), y, z
         };
-        GLfloat texels[getMaxTexUnits()][4*2];
-        memset((void*)texels, 0, getMaxTexUnits()*4*2*sizeof(GLfloat));
 
         gl.glPushClientAttrib(GL_CLIENT_VERTEX_ARRAY_BIT);
         gl.glPushAttrib(GL_TRANSFORM_BIT);
@@ -1702,7 +1703,7 @@ void GLEScmContext::drawTexOES(float x, float y, float z, float width, float hei
             gl.glDisable(GL_CLIP_PLANE0+i);
 
         int nTexPtrs = 0;
-        for (int i=0;i<getMaxTexUnits();++i) {
+        for (int i = 0; i < getMaxTexUnits(); ++i) {
             if (isTextureUnitEnabled(GL_TEXTURE0+i)) {
                 TextureData * texData = NULL;
                 unsigned int texname = getBindedTexture(GL_TEXTURE0+i,GL_TEXTURE_2D);
@@ -1712,20 +1713,23 @@ void GLEScmContext::drawTexOES(float x, float y, float z, float width, float hei
                         NamedObjectType::TEXTURE, tex);
                 if (objData) {
                     texData = (TextureData*)objData;
+
+                    std::array<GLfloat, 8> texels;
+
                     //calculate texels
-                    texels[i][0] = (float)(texData->crop_rect[0])/(float)(texData->width);
-                    texels[i][1] = (float)(texData->crop_rect[1])/(float)(texData->height);
+                    texels[0] = (float)(texData->crop_rect[0])/(float)(texData->width);
+                    texels[1] = (float)(texData->crop_rect[1])/(float)(texData->height);
 
-                    texels[i][2] = (float)(texData->crop_rect[0])/(float)(texData->width);
-                    texels[i][3] = (float)(texData->crop_rect[3]+texData->crop_rect[1])/(float)(texData->height);
+                    texels[2] = (float)(texData->crop_rect[0])/(float)(texData->width);
+                    texels[3] = (float)(texData->crop_rect[3]+texData->crop_rect[1])/(float)(texData->height);
 
-                    texels[i][4] = (float)(texData->crop_rect[2]+texData->crop_rect[0])/(float)(texData->width);
-                    texels[i][5] = (float)(texData->crop_rect[3]+texData->crop_rect[1])/(float)(texData->height);
+                    texels[4] = (float)(texData->crop_rect[2]+texData->crop_rect[0])/(float)(texData->width);
+                    texels[5] = (float)(texData->crop_rect[3]+texData->crop_rect[1])/(float)(texData->height);
 
-                    texels[i][6] = (float)(texData->crop_rect[2]+texData->crop_rect[0])/(float)(texData->width);
-                    texels[i][7] = (float)(texData->crop_rect[1])/(float)(texData->height);
+                    texels[6] = (float)(texData->crop_rect[2]+texData->crop_rect[0])/(float)(texData->width);
+                    texels[7] = (float)(texData->crop_rect[1])/(float)(texData->height);
 
-                    gl.glTexCoordPointer(2,GL_FLOAT,0,texels[i]);
+                    gl.glTexCoordPointer(2, GL_FLOAT, 0, texels.data());
                     nTexPtrs++;
                 }
             }

@@ -15,12 +15,13 @@
 #ifndef ANDROID_EMUGL_LIBRENDER_RENDER_WINDOW_H
 #define ANDROID_EMUGL_LIBRENDER_RENDER_WINDOW_H
 
-#include "render-utils/render_api.h"
+#include <optional>
+#include <thread>
 
-#include "aemu/base/synchronization/MessageChannel.h"
-#include "aemu/base/threads/FunctorThread.h"
-#include "aemu/base/threads/Thread.h"
 #include "gfxstream/host/Features.h"
+#include "gfxstream/synchronization/MessageChannel.h"
+#include "gfxstream/threads/Thread.h"
+#include "render-utils/render_api.h"
 
 namespace gfxstream {
 
@@ -50,7 +51,7 @@ struct RenderWindowMessage;
 //  6) Call repaint() to force a repaint().
 //
 class RenderWindow {
-public:
+   public:
     // Create new instance. |width| and |height| are the dimensions of the
     // emulated accelerated framebuffer. |use_thread| can be true to force
     // the use of a separate thread, which might be required on some platforms
@@ -62,8 +63,8 @@ public:
     //
     // Note that this call doesn't display anything, it just initializes
     // the library, use setupSubWindow() to display something.
-    RenderWindow(int width, int height, gfxstream::host::FeatureSet features,
-                 bool use_thread, bool use_sub_window, bool egl2egl);
+    RenderWindow(int width, int height, const gfxstream::host::FeatureSet& features,
+                 bool use_thread, bool use_sub_window);
 
     // Destructor. This will automatically call removeSubWindow() is needed.
     ~RenderWindow();
@@ -132,7 +133,7 @@ public:
     void setTranslation(float px, float py);
 
     // Receive a screen mask and pass it to TextureDraw
-    void setScreenMask(int width, int height, const unsigned char* rgbaData);
+    void setScreenMask(int width, int height, const uint8_t* rgbaData);
 
     // Force a repaint of the whole content into the sub-window.
     void repaint();
@@ -151,21 +152,22 @@ public:
     void setVsyncHz(int vsyncHz);
     void setDisplayConfigs(int configId, int w, int h, int dpiX, int dpiY);
     void setDisplayActiveConfig(int configId);
-private:
+
+   private:
     bool processMessage(const RenderWindowMessage& msg);
     bool useThread() const { return mThread != nullptr; }
 
     bool mValid = false;
     bool mHasSubWindow = false;
-    android::base::Thread* mThread = nullptr;
+    gfxstream::base::Thread* mThread = nullptr;
     RenderWindowChannel* mChannel = nullptr;
 
     // A worker thread to run repost() commands asynchronously.
     enum class RepostCommand : char {
         Repost, Sync
     };
-    android::base::MessageChannel<RepostCommand, 10> mRepostCommands;
-    android::base::FunctorThread mRepostThread;
+    gfxstream::base::MessageChannel<RepostCommand, 10> mRepostCommands;
+    std::optional<std::thread> mRepostThread;
 
     bool mPaused = false;
 };

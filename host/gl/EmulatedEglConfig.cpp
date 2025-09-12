@@ -14,15 +14,14 @@
 
 #include "EmulatedEglConfig.h"
 
-#include "OpenGLESDispatch/EGLDispatch.h"
-#include "gfxstream/host/Features.h"
-#include "host-common/opengl/emugl_config.h"
-#include "host-common/logging.h"
-#include "host-common/misc.h"
-#include "host-common/opengl/misc.h"
-
 #include <stdio.h>
 #include <string.h>
+
+#include "OpenGLESDispatch/EGLDispatch.h"
+#include "gfxstream/host/Features.h"
+#include "gfxstream/host/guest_operations.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/host/renderer_operations.h"
 
 namespace gfxstream {
 namespace gl {
@@ -80,6 +79,8 @@ bool isCompatibleHostConfig(EGLConfig config, EGLDisplay display) {
     s_egl.eglGetConfigAttrib(
             display, config, EGL_SURFACE_TYPE, &surfaceType);
     if (!(surfaceType & EGL_PBUFFER_BIT)) {
+        GFXSTREAM_VERBOSE("%s:%d surfaceType=%d is not compatible", __func__, __LINE__,
+                          surfaceType);
         return false;
     }
 
@@ -92,6 +93,9 @@ bool isCompatibleHostConfig(EGLConfig config, EGLDisplay display) {
     s_egl.eglGetConfigAttrib(
             display, config, EGL_BLUE_SIZE, &blueSize);
     if (!redSize || !greenSize || !blueSize) {
+        GFXSTREAM_VERBOSE(
+            "%s:%d surfaceType=%d is not compatible, redSize=%d greenSize=%d blueSize=%d", __func__,
+            __LINE__, surfaceType, redSize, greenSize, blueSize);
         return false;
     }
 
@@ -137,13 +141,13 @@ EmulatedEglConfigList::EmulatedEglConfigList(EGLDisplay display,
           mGlesDispatchMaxVersion(version),
           mGlesDynamicVersion(features.GlesDynamicVersion.enabled) {
     if (display == EGL_NO_DISPLAY) {
-        ERR("Invalid display value %p (EGL_NO_DISPLAY).", (void*)display);
+        GFXSTREAM_ERROR("Invalid display value %p (EGL_NO_DISPLAY).", (void*)display);
         return;
     }
 
     EGLint numHostConfigs = 0;
     if (!s_egl.eglGetConfigs(display, NULL, 0, &numHostConfigs)) {
-        ERR("Failed to get number of host EGL configs.");
+        GFXSTREAM_ERROR("Failed to get number of host EGL configs.");
         return;
     }
     std::vector<EGLConfig> hostConfigs(numHostConfigs);
@@ -160,12 +164,22 @@ EmulatedEglConfigList::EmulatedEglConfigList(EGLDisplay display,
     }
 }
 
+const EmulatedEglConfig* EmulatedEglConfigList::get(int guestId) const {
+    if (guestId >= 0 && guestId < (int)mConfigs.size()) {
+        return &mConfigs[guestId];
+    } else {
+        GFXSTREAM_INFO("Requested invalid EGL config id: %d (list size: %d)", guestId,
+                       (int)mConfigs.size());
+        return NULL;
+    }
+}
+
 int EmulatedEglConfigList::chooseConfig(const EGLint* attribs,
                                         EGLint* configs,
                                         EGLint configsSize) const {
     EGLint numHostConfigs = 0;
     if (!s_egl.eglGetConfigs(mDisplay, NULL, 0, &numHostConfigs)) {
-        ERR("Failed to get number of host EGL configs.");
+        GFXSTREAM_ERROR("Failed to get number of host EGL configs.");
         return 0;
     }
 
@@ -203,19 +217,17 @@ int EmulatedEglConfigList::chooseConfig(const EGLint* attribs,
         memcpy(&newAttribs[0], attribs, numAttribs * sizeof(EGLint));
     }
 
-    int apiLevel;
-    emugl::getAvdInfo(NULL, &apiLevel);
-
+    const int apiLevel = get_gfxstream_guest_android_api_level();
     if (!hasSurfaceType) {
         newAttribs.push_back(EGL_SURFACE_TYPE);
         newAttribs.push_back(0);
     } else if (wantSwapPreserved && apiLevel <= 19) {
         newAttribs[surfaceTypeIdx + 1] &= ~(EGLint)EGL_SWAP_BEHAVIOR_PRESERVED_BIT;
     }
-    if (emugl::getRenderer() == SELECTED_RENDERER_SWIFTSHADER ||
-        emugl::getRenderer() == SELECTED_RENDERER_SWIFTSHADER_INDIRECT ||
-        emugl::getRenderer() == SELECTED_RENDERER_ANGLE ||
-        emugl::getRenderer() == SELECTED_RENDERER_ANGLE_INDIRECT) {
+    if (get_gfxstream_renderer() == SELECTED_RENDERER_SWIFTSHADER ||
+        get_gfxstream_renderer() == SELECTED_RENDERER_SWIFTSHADER_INDIRECT ||
+        get_gfxstream_renderer() == SELECTED_RENDERER_ANGLE ||
+        get_gfxstream_renderer() == SELECTED_RENDERER_ANGLE_INDIRECT) {
         newAttribs.push_back(EGL_CONFIG_CAVEAT);
         newAttribs.push_back(EGL_DONT_CARE);
     }

@@ -17,18 +17,19 @@
 
 #include <memory>
 
-#include "aemu/base/HealthMonitor.h"
-#include "aemu/base/Metrics.h"
-#include "utils/GfxApiLogger.h"
+#include "gfxstream/HealthMonitor.h"
+#include "gfxstream/Metrics.h"
+#include "gfxstream/host/GfxApiLogger.h"
 
 namespace gfxstream {
 namespace vk {
 
 struct VkDecoderContext {
     const char* processName = nullptr;
-    emugl::GfxApiLogger* gfxApiLogger = nullptr;
-    emugl::HealthMonitor<>* healthMonitor = nullptr;
-    emugl::MetricsLogger* metricsLogger = nullptr;
+    host::GfxApiLogger* gfxApiLogger = nullptr;
+    HealthMonitor<>* healthMonitor = nullptr;
+    MetricsLogger* metricsLogger = nullptr;
+    std::atomic_bool* shouldExit = nullptr;
 };
 
 }  // namespace vk

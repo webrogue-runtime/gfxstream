@@ -15,7 +15,8 @@
 #include "Buffer.h"
 
 #if GFXSTREAM_ENABLE_HOST_GLES
-#include "gl/EmulationGl.h"
+#include "BufferGl.h"
+#include "EmulationGl.h"
 #endif
 
 #include "vulkan/BufferVk.h"
@@ -23,21 +24,52 @@
 
 namespace gfxstream {
 
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
+class Buffer::Impl : public LazySnapshotObj<Buffer::Impl> {
+   public:
+    static std::unique_ptr<Impl> create(gl::EmulationGl* emulationGl, vk::VkEmulation* emulationVk,
+                                        uint64_t size, HandleType handle);
 
-Buffer::Buffer(HandleType handle, uint64_t size) : mHandle(handle), mSize(size) {}
+    static std::unique_ptr<Impl> onLoad(gl::EmulationGl* emulationGl, vk::VkEmulation* emulationVk,
+                                        gfxstream::Stream* stream);
+
+    void onSave(gfxstream::Stream* stream);
+    void restore();
+
+    HandleType getHndl() const { return mHandle; }
+    uint64_t getSize() const { return mSize; }
+
+    void readToBytes(uint64_t offset, uint64_t size, void* outBytes);
+    bool updateFromBytes(uint64_t offset, uint64_t size, const void* bytes);
+    std::optional<BlobDescriptorInfo> exportBlob();
+
+   private:
+    Impl(HandleType handle, uint64_t size);
+
+    const HandleType mHandle;
+    const uint64_t mSize;
+
+#if GFXSTREAM_ENABLE_HOST_GLES
+    // If GL emulation is enabled.
+    std::unique_ptr<gl::BufferGl> mBufferGl;
+#endif
+
+    // If Vk emulation is enabled.
+    std::unique_ptr<vk::BufferVk> mBufferVk;
+};
+
+Buffer::Impl::Impl(HandleType handle, uint64_t size) : mHandle(handle), mSize(size) {}
 
 /*static*/
-std::shared_ptr<Buffer> Buffer::create(gl::EmulationGl* emulationGl, vk::VkEmulation* emulationVk,
-                                       uint64_t size, HandleType handle) {
-    std::shared_ptr<Buffer> buffer(new Buffer(handle, size));
+std::unique_ptr<Buffer::Impl> Buffer::Impl::create(gl::EmulationGl* emulationGl,
+                                                   vk::VkEmulation* emulationVk, uint64_t size,
+                                                   HandleType handle) {
+    std::unique_ptr<Buffer::Impl> buffer(new Buffer::Impl(handle, size));
 
 #if GFXSTREAM_ENABLE_HOST_GLES
     if (emulationGl) {
         buffer->mBufferGl = emulationGl->createBuffer(size, handle);
         if (!buffer->mBufferGl) {
-            ERR("Failed to initialize BufferGl.");
+            GFXSTREAM_ERROR("Failed to initialize BufferGl.");
             return nullptr;
         }
     }
@@ -48,14 +80,14 @@ std::shared_ptr<Buffer> Buffer::create(gl::EmulationGl* emulationGl, vk::VkEmula
 
         buffer->mBufferVk = vk::BufferVk::create(*emulationVk, handle, size, vulkanOnly);
         if (!buffer->mBufferVk) {
-            ERR("Failed to initialize BufferVk.");
+            GFXSTREAM_ERROR("Failed to initialize BufferVk.");
             return nullptr;
         }
 
         if (!vulkanOnly) {
 #if GFXSTREAM_ENABLE_HOST_GLES
             if (!buffer->mBufferGl) {
-                GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << "Missing BufferGl?";
+                GFXSTREAM_FATAL("Missing BufferGl?");
             }
 #endif
             // TODO: external memory sharing.
@@ -66,18 +98,18 @@ std::shared_ptr<Buffer> Buffer::create(gl::EmulationGl* emulationGl, vk::VkEmula
 }
 
 /*static*/
-std::shared_ptr<Buffer> Buffer::onLoad(gl::EmulationGl* emulationGl, vk::VkEmulation*,
-                                       android::base::Stream* stream) {
+std::unique_ptr<Buffer::Impl> Buffer::Impl::onLoad(gl::EmulationGl* emulationGl, vk::VkEmulation*,
+                                                   gfxstream::Stream* stream) {
     const auto handle = static_cast<HandleType>(stream->getBe32());
     const auto size = static_cast<uint64_t>(stream->getBe64());
 
-    std::shared_ptr<Buffer> buffer(new Buffer(handle, size));
+    std::unique_ptr<Buffer::Impl> buffer(new Buffer::Impl(handle, size));
 
 #if GFXSTREAM_ENABLE_HOST_GLES
     if (emulationGl) {
         buffer->mBufferGl = emulationGl->loadBuffer(stream);
         if (!buffer->mBufferGl) {
-            ERR("Failed to load BufferGl.");
+            GFXSTREAM_ERROR("Failed to load BufferGl.");
             return nullptr;
         }
     }
@@ -88,7 +120,7 @@ std::shared_ptr<Buffer> Buffer::onLoad(gl::EmulationGl* emulationGl, vk::VkEmula
     return buffer;
 }
 
-void Buffer::onSave(android::base::Stream* stream) {
+void Buffer::Impl::onSave(gfxstream::Stream* stream) {
     stream->putBe32(mHandle);
     stream->putBe64(mSize);
 
@@ -99,9 +131,9 @@ void Buffer::onSave(android::base::Stream* stream) {
 #endif
 }
 
-void Buffer::restore() {}
+void Buffer::Impl::restore() {}
 
-void Buffer::readToBytes(uint64_t offset, uint64_t size, void* outBytes) {
+void Buffer::Impl::readToBytes(uint64_t offset, uint64_t size, void* outBytes) {
     touch();
 
 #if GFXSTREAM_ENABLE_HOST_GLES
@@ -116,10 +148,10 @@ void Buffer::readToBytes(uint64_t offset, uint64_t size, void* outBytes) {
         return;
     }
 
-    GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << "No Buffer impl?";
+    GFXSTREAM_FATAL("No Buffer impl?");
 }
 
-bool Buffer::updateFromBytes(uint64_t offset, uint64_t size, const void* bytes) {
+bool Buffer::Impl::updateFromBytes(uint64_t offset, uint64_t size, const void* bytes) {
     touch();
 
 #if GFXSTREAM_ENABLE_HOST_GLES
@@ -133,16 +165,57 @@ bool Buffer::updateFromBytes(uint64_t offset, uint64_t size, const void* bytes) 
         return mBufferVk->updateFromBytes(offset, size, bytes);
     }
 
-    GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << "No Buffer impl?";
+    GFXSTREAM_FATAL("No Buffer impl?");
     return false;
 }
 
-std::optional<BlobDescriptorInfo> Buffer::exportBlob() {
+std::optional<BlobDescriptorInfo> Buffer::Impl::exportBlob() {
     if (!mBufferVk) {
         return std::nullopt;
     }
 
     return mBufferVk->exportBlob();
 }
+
+/*static*/
+std::shared_ptr<Buffer> Buffer::create(gl::EmulationGl* emulationGl, vk::VkEmulation* emulationVk,
+                                       uint64_t size, HandleType handle) {
+    std::shared_ptr<Buffer> buffer(new Buffer());
+    buffer->mImpl = Buffer::Impl::create(emulationGl, emulationVk, size, handle);
+    if (!buffer->mImpl) {
+        return nullptr;
+    }
+    return buffer;
+}
+
+/*static*/
+std::shared_ptr<Buffer> Buffer::onLoad(gl::EmulationGl* emulationGl, vk::VkEmulation* emulationVk,
+                                       gfxstream::Stream* stream) {
+    std::shared_ptr<Buffer> buffer(new Buffer());
+    buffer->mImpl = Buffer::Impl::onLoad(emulationGl, emulationVk, stream);
+    if (!buffer->mImpl) {
+        return nullptr;
+    }
+    buffer->mNeedRestore = true;
+    return buffer;
+}
+
+void Buffer::onSave(gfxstream::Stream* stream) { mImpl->onSave(stream); }
+
+void Buffer::restore() { mImpl->touch(); }
+
+HandleType Buffer::getHndl() const { return mImpl->getHndl(); }
+
+uint64_t Buffer::getSize() const { return mImpl->getSize(); }
+
+void Buffer::readToBytes(uint64_t offset, uint64_t size, void* outBytes) {
+    return mImpl->readToBytes(offset, size, outBytes);
+}
+
+bool Buffer::updateFromBytes(uint64_t offset, uint64_t size, const void* bytes) {
+    return mImpl->updateFromBytes(offset, size, bytes);
+}
+
+std::optional<BlobDescriptorInfo> Buffer::exportBlob() { return mImpl->exportBlob(); }
 
 }  // namespace gfxstream

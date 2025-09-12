@@ -16,26 +16,25 @@
 
 #include "TextureResize.h"
 
+#include <GLES2/gl2ext.h>
 #include <stdio.h>
 #include <string.h>
+
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include <GLES2/gl2ext.h>
-
 #include "OpenGLESDispatch/DispatchTables.h"
-#include "aemu/base/synchronization/Lock.h"
-#include "host-common/logging.h"
-#include "host-common/misc.h"
-#include "host-common/opengl/misc.h"
+#include "gfxstream/Strings.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/host/renderer_operations.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "render-utils/Renderer.h"
 
 namespace gfxstream {
 namespace gl {
 
-// #define V(...)  VERBOSE_PRINT(gles,__VA_ARGS__)
-#define V(...)
 #define MAX_FACTOR_POWER 4
 
 static const char kCommonShaderSource[] =
@@ -157,7 +156,7 @@ const char kGenericFragmentShaderSource[] = R"(
 )";
 
 static const float kVertexData[] = {-1, -1, 3, -1, -1, 3};
-static android::base::Lock s_postContextResources;
+static gfxstream::base::Lock s_postContextResources;
 static std::vector<GLuint> s_programsToRelease;
 static std::vector<GLuint> s_framebuffersToRelease;
 
@@ -173,9 +172,8 @@ static GLuint createShader(GLenum type, std::initializer_list<const char*> sourc
             s_gles2.glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLength);
             std::string infoLog(infoLength + 1, '\0');
             s_gles2.glGetShaderInfoLog(shader, infoLength, nullptr, &infoLog[0]);
-            ERR("%s shader compile failed:\n%s\n",
-                    (type == GL_VERTEX_SHADER) ? "Vertex" : "Fragment",
-                    infoLog.c_str());
+            GFXSTREAM_ERROR("%s shader compile failed:\n%s\n",
+                            (type == GL_VERTEX_SHADER) ? "Vertex" : "Fragment", infoLog.c_str());
             s_gles2.glDeleteShader(shader);
             shader = 0;
         }
@@ -229,16 +227,16 @@ TextureResize::TextureResize(GLuint width, GLuint height) :
     const char* exts = (const char*)s_gles2.glGetString(GL_EXTENSIONS);
 
     bool hasColorBufferFloat =
-        emugl::getRenderer() == SELECTED_RENDERER_HOST ||
-        emugl::hasExtension(exts, "GL_EXT_color_buffer_float");
+        get_gfxstream_renderer() == SELECTED_RENDERER_HOST ||
+        HasExtension(exts, "GL_EXT_color_buffer_float");
     bool hasColorBufferHalfFloat =
-        emugl::hasExtension(exts, "GL_EXT_color_buffer_half_float");
+        HasExtension(exts, "GL_EXT_color_buffer_half_float");
     bool hasTextureFloat =
-        emugl::hasExtension(exts, "GL_OES_texture_float");
+        HasExtension(exts, "GL_OES_texture_float");
     bool hasTextureHalfFloat =
-        emugl::hasExtension(exts, "GL_OES_texture_half_float");
+        HasExtension(exts, "GL_OES_texture_half_float");
     bool hasTextureFloatLinear =
-        emugl::hasExtension(exts, "GL_OES_texture_float_linear");
+        HasExtension(exts, "GL_OES_texture_float_linear");
 
     if (hasColorBufferFloat && hasTextureFloat) {
         mTextureDataType = GL_FLOAT;
@@ -281,7 +279,7 @@ TextureResize::~TextureResize() {
     // b/242245912
     // There seems to be a mesa bug that we have to delete the
     // program in the post thread.
-    android::base::AutoLock lock(s_postContextResources);
+    gfxstream::base::AutoLock lock(s_postContextResources);
     s_programsToRelease.push_back(mFBWidth.program);
     s_programsToRelease.push_back(mFBHeight.program);
     // b/285421327
@@ -323,7 +321,7 @@ GLuint TextureResize::update(GLuint texture) {
     // If there was an error while resizing, just use the unscaled texture.
     GLenum error = s_gles2.glGetError();
     if (error != GL_NO_ERROR) {
-        V("GL error while resizing: 0x%x (ignored)\n", error);
+        GFXSTREAM_VERBOSE("GL error while resizing: 0x%x (ignored)\n", error);
         return texture;
     }
 
@@ -425,7 +423,7 @@ void TextureResize::resize(GLuint texture) {
     s_gles2.glBindTexture(GL_TEXTURE_2D, 0);
     s_gles2.glDisableVertexAttribArray(mFBHeight.aPosition);
     s_gles2.glUseProgram(0);
-    android::base::AutoLock lock(s_postContextResources);
+    gfxstream::base::AutoLock lock(s_postContextResources);
     while (s_programsToRelease.size()) {
         s_gles2.glDeleteProgram(s_programsToRelease.back());
         s_programsToRelease.pop_back();
@@ -468,7 +466,7 @@ TextureResize::GenericResizer::GenericResizer() :
     if (success == GL_FALSE) {
         GLchar infolog[256];
         s_gles2.glGetProgramInfoLog(mProgram, sizeof(infolog), 0, infolog);
-        fprintf(stderr, "Could not create/link program: %s\n", infolog);
+        GFXSTREAM_ERROR("Could not create/link program: %s\n", infolog);
         return;
     }
 
@@ -584,20 +582,20 @@ GLuint TextureResize::GenericResizer::draw(GLuint texture, int width, int height
     s_gles2.glUniform1i(mInputUniformLocation, 0);
     intptr_t indexShift;
     switch(rotation) {
-    case SKIN_ROTATION_0:
-        indexShift = 0;
-        break;
-    case SKIN_ROTATION_90:
-        indexShift = 6;
-        break;
-    case SKIN_ROTATION_180:
-        indexShift = 12;
-        break;
-    case SKIN_ROTATION_270:
-        indexShift = 18;
-        break;
-    default:
-        indexShift = 0;
+        case GFXSTREAM_ROTATION_0:
+            indexShift = 0;
+            break;
+        case GFXSTREAM_ROTATION_90:
+            indexShift = 6;
+            break;
+        case GFXSTREAM_ROTATION_180:
+            indexShift = 12;
+            break;
+        case GFXSTREAM_ROTATION_270:
+            indexShift = 18;
+            break;
+        default:
+            indexShift = 0;
     }
     s_gles2.glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (const GLvoid*)indexShift);
 

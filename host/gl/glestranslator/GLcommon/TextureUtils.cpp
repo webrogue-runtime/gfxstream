@@ -21,10 +21,10 @@
 #include <cmath>
 #include <memory>
 
-#include "aemu/base/AlignedBuf.h"
-#include "compressedTextureFormats/AstcCpuDecompressor.h"
+#include "gfxstream/AlignedBuf.h"
+#include "gfxstream/host/AstcCpuDecompressor.h"
 
-using android::AlignedBuf;
+using gfxstream::AlignedBuf;
 using gfxstream::vk::AstcCpuDecompressor;
 
 #define GL_R16 0x822A
@@ -170,13 +170,15 @@ bool astcDecompress(const uint8_t* astcData, size_t astcDataSize, uint32_t width
                     uint32_t blockWidth, uint32_t blockHeight, uint8_t* outBuffer,
                     size_t outBufferSize) {
     if (outBufferSize < width * height * 4) {
-        WARN("ASTC output buffer too small: %d bytes for %d x %d", outBufferSize, width, height);
+        GFXSTREAM_WARNING("ASTC output buffer too small: %d bytes for %d x %d", outBufferSize,
+                          width, height);
         return false;
     }
     int32_t status = AstcCpuDecompressor::get().decompress(width, height, blockWidth, blockHeight,
                                                            astcData, astcDataSize, outBuffer);
     if (status != 0) {
-        WARN("astc decompression failed: %s", AstcCpuDecompressor::get().getStatusString(status));
+        GFXSTREAM_WARNING("astc decompression failed: %s",
+                          AstcCpuDecompressor::get().getStatusString(status));
         return false;
     }
     return true;

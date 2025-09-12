@@ -14,27 +14,26 @@
 * limitations under the License.
 */
 
-#include <GLcommon/GLEScontext.h>
-
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/containers/Lookup.h"
-#include "aemu/base/files/StreamSerializing.h"
-#include "host-common/logging.h"
-
-#include <GLcommon/GLconversion_macros.h>
-#include <GLcommon/GLSnapshotSerializers.h>
-#include <GLcommon/GLESmacros.h>
-#include <GLcommon/TextureData.h>
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <GLES3/gl3.h>
 #include <GLES3/gl31.h>
-#include <GLcommon/GLESvalidate.h>
-#include <GLcommon/TextureUtils.h>
 #include <GLcommon/FramebufferData.h>
+#include <GLcommon/GLEScontext.h>
+#include <GLcommon/GLESmacros.h>
+#include <GLcommon/GLESvalidate.h>
+#include <GLcommon/GLSnapshotSerializers.h>
+#include <GLcommon/GLconversion_macros.h>
 #include <GLcommon/ScopedGLState.h>
+#include <GLcommon/TextureData.h>
+#include <GLcommon/TextureUtils.h>
+
+#include "gfxstream/containers/Lookup.h"
+#include "gfxstream/host/stream_utils.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/common/logging.h"
 #ifndef _MSC_VER
 #include <strings.h>
 #endif
@@ -49,7 +48,7 @@ static void convertFixedIndirectLoop(const char* dataIn,unsigned int strideIn,vo
 static void convertByteDirectLoop(const char* dataIn,unsigned int strideIn,void* dataOut,unsigned int nBytes,unsigned int strideOut,int attribSize);
 static void convertByteIndirectLoop(const char* dataIn,unsigned int strideIn,void* dataOut,GLsizei count,GLenum indices_type,const GLvoid* indices,unsigned int strideOut,int attribSize);
 
-void BufferBinding::onLoad(android::base::Stream* stream) {
+void BufferBinding::onLoad(gfxstream::Stream* stream) {
     buffer = stream->getBe32();
     offset = stream->getBe32();
     size = stream->getBe32();
@@ -58,7 +57,7 @@ void BufferBinding::onLoad(android::base::Stream* stream) {
     isBindBase = stream->getByte();
 }
 
-void BufferBinding::onSave(android::base::Stream* stream) const {
+void BufferBinding::onSave(gfxstream::Stream* stream) const {
     stream->putBe32(buffer);
     stream->putBe32(offset);
     stream->putBe32(size);
@@ -67,7 +66,7 @@ void BufferBinding::onSave(android::base::Stream* stream) const {
     stream->putByte(isBindBase);
 }
 
-VAOState::VAOState(android::base::Stream* stream) {
+VAOState::VAOState(gfxstream::Stream* stream) {
     element_array_buffer_binding = stream->getBe32();
 
     vertexAttribInfo.clear();
@@ -94,7 +93,7 @@ VAOState::VAOState(android::base::Stream* stream) {
     everBound = stream->getByte();
 }
 
-void VAOState::onSave(android::base::Stream* stream) const {
+void VAOState::onSave(gfxstream::Stream* stream) const {
     stream->putBe32(element_array_buffer_binding);
     for (uint32_t i = 0; i < kMaxVertexAttributes; ++i) {
         vertexAttribInfo[i].onSave(stream);
@@ -174,7 +173,7 @@ void GLESConversionArrays::operator++(){
 }
 
 GLDispatch     GLEScontext::s_glDispatch;
-android::base::Lock   GLEScontext::s_lock;
+gfxstream::base::Lock   GLEScontext::s_lock;
 std::string*   GLEScontext::s_glExtensionsGles1 = NULL;
 bool           GLEScontext::s_glExtensionsGles1Initialized = false;
 std::string*   GLEScontext::s_glExtensionsGles31 = NULL;
@@ -296,7 +295,7 @@ static GLuint getIndex(GLenum indices_type, const GLvoid* indices, unsigned int 
         case GL_UNSIGNED_INT:
             return static_cast<const GLuint*>(indices)[i];
         default:
-            ERR("**** ERROR unknown type 0x%x", indices_type);
+            GFXSTREAM_ERROR("**** ERROR unknown type 0x%x", indices_type);
             return 0;
     }
 }
@@ -458,7 +457,7 @@ void GLEScontext::setActiveTexture(GLenum tex) {
 GLEScontext::GLEScontext() {}
 
 GLEScontext::GLEScontext(GlobalNameSpace* globalNameSpace,
-        android::base::Stream* stream, GlLibrary* glLib) {
+        gfxstream::Stream* stream, GlLibrary* glLib) {
     if (stream) {
         m_initialized = stream->getByte();
         m_glesMajorVersion = stream->getBe32();
@@ -506,7 +505,7 @@ GLEScontext::GLEScontext(GlobalNameSpace* globalNameSpace,
             m_scissorHeight = static_cast<GLsizei>(stream->getBe32());
 
             loadCollection(stream, &m_glEnableList,
-                    [](android::base::Stream* stream) {
+                    [](gfxstream::Stream* stream) {
                         GLenum item = stream->getBe32();
                         bool enabled = stream->getByte();
                         return std::make_pair(item, enabled);
@@ -517,7 +516,7 @@ GLEScontext::GLEScontext(GlobalNameSpace* globalNameSpace,
             stream->read(m_blendStates.data(), sizeof(BlendState) * blendStateCount);
 
             loadCollection(stream, &m_glPixelStoreiList,
-                    [](android::base::Stream* stream) {
+                    [](gfxstream::Stream* stream) {
                         GLenum item = stream->getBe32();
                         GLint val = stream->getBe32();
                         return std::make_pair(item, val);
@@ -566,7 +565,7 @@ GLEScontext::GLEScontext(GlobalNameSpace* globalNameSpace,
     }
     ObjectData::loadObject_t loader = [this](NamedObjectType type,
                                              long long unsigned int localName,
-                                             android::base::Stream* stream) {
+                                             gfxstream::Stream* stream) {
         return loadObject(type, localName, stream);
     };
     m_fboNameSpace = new NameSpace(NamedObjectType::FRAMEBUFFER,
@@ -643,7 +642,7 @@ void GLEScontext::postLoad() {
             });
 }
 
-void GLEScontext::onSave(android::base::Stream* stream) const {
+void GLEScontext::onSave(gfxstream::Stream* stream) const {
     stream->putByte(m_initialized);
     stream->putBe32(m_glesMajorVersion);
     stream->putBe32(m_glesMinorVersion);
@@ -685,7 +684,7 @@ void GLEScontext::onSave(android::base::Stream* stream) const {
         stream->putBe32(m_scissorWidth);
         stream->putBe32(m_scissorHeight);
 
-        saveCollection(stream, m_glEnableList, [](android::base::Stream* stream,
+        saveCollection(stream, m_glEnableList, [](gfxstream::Stream* stream,
                 const std::pair<const GLenum, bool>& enableItem) {
                     stream->putBe32(enableItem.first);
                     stream->putByte(enableItem.second);
@@ -693,7 +692,7 @@ void GLEScontext::onSave(android::base::Stream* stream) const {
         stream->putBe32((int)m_blendStates.size());
         stream->write(m_blendStates.data(), sizeof(BlendState) * m_blendStates.size());
 
-        saveCollection(stream, m_glPixelStoreiList, [](android::base::Stream* stream,
+        saveCollection(stream, m_glPixelStoreiList, [](gfxstream::Stream* stream,
                 const std::pair<const GLenum, GLint>& pixelStore) {
                     stream->putBe32(pixelStore.first);
                     stream->putBe32(pixelStore.second);
@@ -738,7 +737,7 @@ void GLEScontext::onSave(android::base::Stream* stream) const {
     // do not save m_vaoNameSpace
 }
 
-void GLEScontext::postSave(android::base::Stream* stream) const {
+void GLEScontext::postSave(gfxstream::Stream* stream) const {
     (void)stream;
     // We need to mark the textures dirty, for those that has been bound to
     // a potential render target.
@@ -931,14 +930,14 @@ void GLEScontext::postLoadRestoreCtx() {
         err = dispatcher.glGetError();
 #ifdef _DEBUG
         if (err) {
-            ERR("warning: get GL error %d while restoring a snapshot", err);
+            GFXSTREAM_ERROR("warning: get GL error %d while restoring a snapshot", err);
         }
 #endif
     } while (err != 0);
 }
 
 ObjectDataPtr GLEScontext::loadObject(NamedObjectType type,
-            ObjectLocalName localName, android::base::Stream* stream) const {
+            ObjectLocalName localName, gfxstream::Stream* stream) const {
     switch (type) {
         case NamedObjectType::VERTEXBUFFER:
             return ObjectDataPtr(new GLESbuffer(stream));
@@ -977,7 +976,8 @@ const GLvoid* GLEScontext::setPointer(GLenum arrType,GLint size,GLenum type,GLsi
                                         bufferName));
         if(offset >= vbo->getSize() || ((int)(vbo->getSize() - offset) < size)) {
 #ifdef _DEBUG
-            ERR("Warning: Invalid pointer offset %u, arrType %d, type %d", offset, arrType, type);
+            GFXSTREAM_ERROR("Warning: Invalid pointer offset %u, arrType %d, type %d", offset,
+                            arrType, type);
 #endif
             return nullptr;
         }
@@ -1145,7 +1145,8 @@ void GLEScontext::convertDirectVBO(GLESConversionArrays& cArrs,GLint first,GLsiz
 unsigned int GLEScontext::findMaxIndex(GLsizei count,GLenum type,const GLvoid* indices) {
     // finding max index
     if (!indices || !GLESvalidate::drawType(type)) {
-        ERR("%s called with invalid arguments (%d, %u, %p)", __func__, count, type, indices);
+        GFXSTREAM_ERROR("%s called with invalid arguments (%d, %u, %p)", __func__, count, type,
+                        indices);
         return 0;
     }
 
@@ -1556,7 +1557,7 @@ bool GLEScontext::isEnabled(GLenum item) const {
         case GL_BLEND:
             return m_blendStates[0].bEnable!=GL_FALSE;
         default:
-            return android::base::findOrDefault(m_glEnableList, item, false);
+            return gfxstream::base::findOrDefault(m_glEnableList, item, false);
     }
 }
 
@@ -1865,11 +1866,11 @@ void GLEScontext::initCapsLocked(const GLubyte * extensionString, bool nativeTex
                 hasEtc2Support = true; // Supports ETC2 underneath
             } else {
                 // It is unusual to support only some. Record what happened.
-                ERR("Not supporting etc2: %d vs %d",
-                    numEtc2FormatsSupported, numEtc2Formats);
+                GFXSTREAM_ERROR("Not supporting etc2: %d vs %d", numEtc2FormatsSupported,
+                                numEtc2Formats);
                 for (auto it : found) {
                     if (!it.second) {
-                        ERR("Not found: 0x%x", it.first);
+                        GFXSTREAM_ERROR("Not found: 0x%x", it.first);
                     }
                 }
             }
@@ -1878,11 +1879,11 @@ void GLEScontext::initCapsLocked(const GLubyte * extensionString, bool nativeTex
                 hasAstcSupport = true; // Supports ASTC underneath
             } else {
                 // It is unusual to support only some. Record what happened.
-                ERR("Not supporting astc: %d vs %d",
-                    numAstcFormatsSupported, numAstcFormats);
+                GFXSTREAM_ERROR("Not supporting astc: %d vs %d", numAstcFormatsSupported,
+                                numAstcFormats);
                 for (auto it : found) {
                     if (!it.second) {
-                        ERR("Not found: 0x%x", it.first);
+                        GFXSTREAM_ERROR("Not found: 0x%x", it.first);
                     }
                 }
             }
@@ -2272,7 +2273,7 @@ void GLEScontext::initEmulatedEGLSurface(GLint width, GLint height,
         dispatcher().glRenderbufferStorageMultisample(GL_RENDERBUFFER, multisamples, colorFormat, width, height);
         GLint err = dispatcher().glGetError();
         if (err != GL_NO_ERROR) {
-            ERR("error setting up multisampled RBO! 0x%x", err);
+            GFXSTREAM_ERROR("error setting up multisampled RBO! 0x%x", err);
         }
     } else {
         dispatcher().glRenderbufferStorage(GL_RENDERBUFFER, colorFormat, width, height);
@@ -2283,7 +2284,7 @@ void GLEScontext::initEmulatedEGLSurface(GLint width, GLint height,
         dispatcher().glRenderbufferStorageMultisample(GL_RENDERBUFFER, multisamples, depthstencilFormat, width, height);
         GLint err = dispatcher().glGetError();
         if (err != GL_NO_ERROR) {
-            ERR("error setting up multisampled RBO! 0x%x", err);
+            GFXSTREAM_ERROR("error setting up multisampled RBO! 0x%x", err);
         }
     } else {
         dispatcher().glRenderbufferStorage(GL_RENDERBUFFER, depthstencilFormat, width, height);
@@ -2752,7 +2753,7 @@ GLuint GLEScontext::compileAndValidateCoreShader(GLenum shaderType, const char* 
         gl.glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLogLength);
         std::vector<char> infoLog(infoLogLength + 1, 0);
         gl.glGetShaderInfoLog(shader, infoLogLength, nullptr, &infoLog[0]);
-        ERR("fail to compile. infolog %s", &infoLog[0]);
+        GFXSTREAM_ERROR("fail to compile. infolog %s", &infoLog[0]);
     }
 
     return shader;
@@ -2775,7 +2776,7 @@ GLuint GLEScontext::linkAndValidateProgram(GLuint vshader, GLuint fshader) {
         gl.glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLogLength);
         std::vector<char> infoLog(infoLogLength + 1, 0);
         gl.glGetProgramInfoLog(program, infoLogLength, nullptr, &infoLog[0]);
-        ERR("fail to link program. infolog: %s", &infoLog[0]);
+        GFXSTREAM_ERROR("fail to link program. infolog: %s", &infoLog[0]);
     }
 
     gl.glDeleteShader(vshader);

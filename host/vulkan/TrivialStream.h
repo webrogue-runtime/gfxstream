@@ -16,7 +16,7 @@
 
 #include <cstdlib>
 
-#include "render-utils/IOStream.h"
+#include "gfxstream/host/iostream.h"
 
 namespace gfxstream {
 namespace vk {
@@ -36,7 +36,7 @@ class TrivialStream : public IOStream {
                 m_buf = p;
                 m_bufsize = allocSize;
             } else {
-                ERR("realloc (%zu) failed", allocSize);
+                GFXSTREAM_ERROR("realloc (%zu) failed", allocSize);
                 free(m_buf);
                 m_buf = NULL;
                 m_bufsize = 0;
@@ -60,8 +60,8 @@ class TrivialStream : public IOStream {
 
    protected:
     virtual const unsigned char* readRaw(void* buf, size_t* inout_len) { return nullptr; }
-    virtual void onSave(android::base::Stream* stream) {}
-    virtual unsigned char* onLoad(android::base::Stream* stream) { return nullptr; }
+    virtual void onSave(gfxstream::Stream* stream) {}
+    virtual unsigned char* onLoad(gfxstream::Stream* stream) { return nullptr; }
 };
 
 }  // namespace vk

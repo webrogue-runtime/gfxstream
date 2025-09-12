@@ -19,8 +19,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/files/Stream.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "render-utils/stream.h"
 #include "EglConfig.h"
 #include "EglContext.h"
 #include "EglOsApi.h"
@@ -140,14 +140,14 @@ public:
     EglOS::Context* getGlobalSharedContext() const;
     GlobalNameSpace* getGlobalNameSpace() { return &m_globalNameSpace; }
 
-    void onSaveAllImages(android::base::Stream* stream,
-                         const android::snapshot::ITextureSaverPtr& textureSaver,
+    void onSaveAllImages(gfxstream::Stream* stream,
+                         const gfxstream::ITextureSaverPtr& textureSaver,
                          SaveableTexture::saver_t saver,
                          SaveableTexture::restorer_t restorer);
-    void onLoadAllImages(android::base::Stream* stream,
-                         const android::snapshot::ITextureLoaderPtr& textureLoader,
+    void onLoadAllImages(gfxstream::Stream* stream,
+                         const gfxstream::ITextureLoaderPtr& textureLoader,
                          SaveableTexture::creator_t creator);
-    void postLoadAllImages(android::base::Stream* stream);
+    void postLoadAllImages(gfxstream::Stream* stream);
 
     bool nativeTextureDecompressionEnabled() const;
     void setNativeTextureDecompressionEnabled(bool enabled);
@@ -172,7 +172,7 @@ private:
     SurfacesHndlMap         m_surfaces;
     GlobalNameSpace         m_globalNameSpace;
     ObjectNameManager*      m_manager[MAX_GLES_VERSION];
-    mutable android::base::Lock    m_lock;
+    mutable gfxstream::base::Lock    m_lock;
     ImagesHndlMap           m_eglImages;
     unsigned int            m_nextEglImageId = 0;
     mutable std::shared_ptr<EglOS::Context> m_globalSharedContext;

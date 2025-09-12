@@ -22,25 +22,17 @@
 #include "ColorBuffer.h"
 #include "FrameBuffer.h"
 #include "RenderThreadInfo.h"
-#include "aemu/base/Tracing.h"
-#include "host-common/logging.h"
-#include "host-common/misc.h"
+#include "gfxstream/Tracing.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/host/window_operations.h"
 #include "vulkan/VkCommonOperations.h"
-
-static void sDefaultRunOnUiThread(UiUpdateFunc f, void* data, bool wait) {
-    (void)f;
-    (void)data;
-    (void)wait;
-}
 
 namespace gfxstream {
 
 PostWorker::PostWorker(bool mainThreadPostingOnly, FrameBuffer* fb, Compositor* compositor)
     : mFb(fb),
       m_compositor(compositor),
-      m_mainThreadPostingOnly(mainThreadPostingOnly),
-      m_runOnUiThread(m_mainThreadPostingOnly ? emugl::get_emugl_window_operations().runOnUiThread
-                                              : sDefaultRunOnUiThread) {}
+      m_mainThreadPostingOnly(mainThreadPostingOnly) {}
 
 std::shared_future<void> PostWorker::composeImpl(const FlatComposeRequest& composeRequest) {
     std::shared_future<void> completedFuture =
@@ -48,14 +40,14 @@ std::shared_future<void> PostWorker::composeImpl(const FlatComposeRequest& compo
     completedFuture.wait();
 
     if (!isComposeTargetReady(composeRequest.targetHandle)) {
-        ERR("The last composition on the target buffer hasn't completed.");
+        GFXSTREAM_ERROR("The last composition on the target buffer hasn't completed.");
     }
 
     Compositor::CompositionRequest compositorRequest = {};
     compositorRequest.target = mFb->borrowColorBufferForComposition(composeRequest.targetHandle,
                                                                     /*colorBufferIsTarget=*/true);
     if (!compositorRequest.target) {
-        ERR("Compose target is null (cb=0x%x).", composeRequest.targetHandle);
+        GFXSTREAM_ERROR("Compose target is null (cb=0x%x).", composeRequest.targetHandle);
         return completedFuture;
     }
 
@@ -137,19 +129,33 @@ void PostWorker::clear() {
     runTask(std::packaged_task<void()>([this] { clearImpl(); }));
 }
 
+void PostWorker::screenshot(ColorBuffer* cb, int screenwidth, int screenheight, GLenum format,
+                            GLenum type, int skinRotation, void* outPixels, Rect rect) {
+    // See b/292237104.
+    mFb->lock();
+    cb->readToBytesScaled(screenwidth, screenheight, format, type, skinRotation, rect, outPixels);
+    mFb->unlock();
+}
+
+namespace {
+
+using Task = std::packaged_task<void()>;
+
+void RunOnUiThreadTrampoline(void* data) {
+    std::unique_ptr<Task> taskPtr(reinterpret_cast<Task*>(data));
+    (*taskPtr)();
+}
+
+}  // namespace
+
 void PostWorker::runTask(std::packaged_task<void()> task) {
-    using Task = std::packaged_task<void()>;
     auto taskPtr = std::make_unique<Task>(std::move(task));
     if (m_mainThreadPostingOnly) {
-        if (!m_runOnUiThread) {
-            ERR("m_runOnUiThread function ptr is NULL, going to crash");
+        if (!get_gfxstream_window_operations().run_on_ui_thread) {
+            GFXSTREAM_ERROR("m_runOnUiThread function ptr is NULL, going to crash");
         }
-        m_runOnUiThread(
-            [](void* data) {
-                std::unique_ptr<Task> taskPtr(reinterpret_cast<Task*>(data));
-                (*taskPtr)();
-            },
-            taskPtr.release(), false);
+        get_gfxstream_window_operations()
+            .run_on_ui_thread(RunOnUiThreadTrampoline, taskPtr.release(), false);
     } else {
         (*taskPtr)();
     }

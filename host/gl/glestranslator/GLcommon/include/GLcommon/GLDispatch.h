@@ -20,14 +20,13 @@
 #include <GLES2/gl2.h>
 #include <GLES3/gl3.h>
 
-#include "aemu/base/synchronization/Lock.h"
-#include "host-common/logging.h"
+#include <functional>
 
+#include "GLutils.h"
 #include "OpenGLESDispatch/gldefs.h"
 #include "OpenGLESDispatch/gles_functions.h"
-#include "GLutils.h"
-
-#include <functional>
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/common/logging.h"
 
 #define GLAPIENTRY GL_APIENTRY
 typedef void (*FUNCPTR_NO_ARGS_RET_VOID)();
@@ -69,7 +68,7 @@ public:
 private:
     bool                  m_isLoaded;
     GLESVersion           m_version;
-    static android::base::Lock   s_lock;
+    static gfxstream::base::Lock   s_lock;
 };
 
 #endif  // GL_DISPATCH_H

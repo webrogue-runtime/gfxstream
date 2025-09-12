@@ -14,7 +14,7 @@
 
 #include "RenderThreadInfoVk.h"
 
-#include "host-common/GfxstreamFatalError.h"
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 namespace vk {
@@ -23,8 +23,7 @@ static thread_local RenderThreadInfoVk* tlThreadInfo = nullptr;
 
 RenderThreadInfoVk::RenderThreadInfoVk() {
     if (tlThreadInfo != nullptr) {
-        GFXSTREAM_ABORT(emugl::FatalError(emugl::ABORT_REASON_OTHER))
-            << "Attempted to set thread local Vk render thread info twice.";
+        GFXSTREAM_FATAL("Attempted to thread local RenderThreadInfoVk twice.");
     }
     tlThreadInfo = this;
 }
@@ -33,11 +32,11 @@ RenderThreadInfoVk::~RenderThreadInfoVk() { tlThreadInfo = nullptr; }
 
 RenderThreadInfoVk* RenderThreadInfoVk::get() { return tlThreadInfo; }
 
-void RenderThreadInfoVk::onSave(android::base::Stream* stream) {
+void RenderThreadInfoVk::onSave(gfxstream::Stream* stream) {
     stream->putBe32(ctx_id);
 }
 
-bool RenderThreadInfoVk::onLoad(android::base::Stream* stream) {
+bool RenderThreadInfoVk::onLoad(gfxstream::Stream* stream) {
     ctx_id = stream->getBe32();
     return true;
 }

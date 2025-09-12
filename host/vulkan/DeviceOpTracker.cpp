@@ -17,15 +17,11 @@
 #include <algorithm>
 #include <type_traits>
 
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/logging.h"
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 namespace vk {
 namespace {
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
 
 constexpr const size_t kSizeLoggingThreshold = 200;
 constexpr const auto kSizeLoggingTimeThreshold = std::chrono::seconds(1);
@@ -50,7 +46,8 @@ void DeviceOpTracker::AddPendingGarbage(DeviceOpWaitable waitable, VkFence fence
     });
 
     if (mPendingGarbage.size() > kSizeLoggingThreshold) {
-        WARN("VkDevice:%p has %d pending garbage objects.", mDevice, mPendingGarbage.size());
+        GFXSTREAM_WARNING("VkDevice:%p has %d pending garbage objects.", mDevice,
+                          mPendingGarbage.size());
     }
 }
 
@@ -64,7 +61,8 @@ void DeviceOpTracker::AddPendingGarbage(DeviceOpWaitable waitable, VkSemaphore s
     });
 
     if (mPendingGarbage.size() > kSizeLoggingThreshold) {
-        WARN("VkDevice:%p has %d pending garbage objects.", mDevice, mPendingGarbage.size());
+        GFXSTREAM_WARNING("VkDevice:%p has %d pending garbage objects.", mDevice,
+                          mPendingGarbage.size());
     }
 }
 
@@ -88,9 +86,10 @@ void DeviceOpTracker::PollAndProcessGarbage() {
             });
         if (numOldFuncs > kSizeLoggingThreshold) {
             //TODO(b/382028853): should be a warning
-            VERBOSE("VkDevice:%p has %d pending waitables, %d taking more than %d milliseconds.",
-                 mDevice, mPollFunctions.size(), numOldFuncs,
-                 std::chrono::duration_cast<std::chrono::milliseconds>(kSizeLoggingTimeThreshold));
+            GFXSTREAM_DEBUG(
+                "VkDevice:%p has %d pending waitables, %d taking more than %d milliseconds.",
+                mDevice, mPollFunctions.size(), numOldFuncs,
+                std::chrono::duration_cast<std::chrono::milliseconds>(kSizeLoggingTimeThreshold));
         }
     }
 
@@ -118,9 +117,10 @@ void DeviceOpTracker::PollAndProcessGarbage() {
 
             if (pendingGarbage.timepoint < old) {
                 const auto difference = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    pendingGarbage.timepoint - now);
-                WARN("VkDevice:%p had a waitable pending for %d milliseconds. Leaking object.",
-                     mDevice, difference.count());
+                    now - pendingGarbage.timepoint);
+                GFXSTREAM_WARNING(
+                    "VkDevice:%p had a waitable pending for %d milliseconds. Leaking object.",
+                    mDevice, difference.count());
                 continue;
             }
 
@@ -141,7 +141,8 @@ void DeviceOpTracker::PollAndProcessGarbage() {
         mPendingGarbage.erase(mPendingGarbage.begin(), firstPendingIt);
 
         if (mPendingGarbage.size() > kSizeLoggingThreshold) {
-            WARN("VkDevice:%p has %d pending garbage objects.", mDevice, mPendingGarbage.size());
+            GFXSTREAM_WARNING("VkDevice:%p has %d pending garbage objects.", mDevice,
+                              mPendingGarbage.size());
         }
     }
 }
@@ -154,8 +155,8 @@ void DeviceOpTracker::OnDestroyDevice() {
     {
         std::lock_guard<std::mutex> lock(mPendingGarbageMutex);
         if (!mPendingGarbage.empty()) {
-            WARN("VkDevice:%p has %d leaking garbage objects on destruction.", mDevice,
-                 mPendingGarbage.size());
+            GFXSTREAM_WARNING("VkDevice:%p has %d leaking garbage objects on destruction.", mDevice,
+                              mPendingGarbage.size());
         }
     }
 }
@@ -172,8 +173,7 @@ DeviceOpBuilder::DeviceOpBuilder(DeviceOpTracker& tracker) : mTracker(tracker) {
 
 DeviceOpBuilder::~DeviceOpBuilder() {
     if (!mSubmittedFence) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "Invalid usage: failed to call OnQueueSubmittedWithFence().";
+        GFXSTREAM_FATAL("Invalid usage: failed to call OnQueueSubmittedWithFence().");
     }
 }
 
@@ -189,7 +189,7 @@ VkFence DeviceOpBuilder::CreateFenceForOp() {
 
     mCreatedFence = fence;
     if (result != VK_SUCCESS) {
-        ERR("DeviceOpBuilder failed to create VkFence!");
+        GFXSTREAM_ERROR("DeviceOpBuilder failed to create VkFence!");
         return VK_NULL_HANDLE;
     }
     return fence;
@@ -197,9 +197,9 @@ VkFence DeviceOpBuilder::CreateFenceForOp() {
 
 DeviceOpWaitable DeviceOpBuilder::OnQueueSubmittedWithFence(VkFence fence) {
     if (mCreatedFence.has_value() && fence != mCreatedFence) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "Invalid usage: failed to call OnQueueSubmittedWithFence() with the fence "
-            << "requested from CreateFenceForOp.";
+        GFXSTREAM_FATAL(
+            "Invalid usage: failed to call OnQueueSubmittedWithFence() with the fence "
+            "requested from CreateFenceForOp.");
     }
     mSubmittedFence = fence;
 

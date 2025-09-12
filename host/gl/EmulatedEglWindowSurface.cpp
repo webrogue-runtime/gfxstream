@@ -15,21 +15,17 @@
 */
 #include "EmulatedEglWindowSurface.h"
 
+#include <GLES/glext.h>
 #include <assert.h>
-#include <ios>
 #include <stdio.h>
 #include <string.h>
 
-#include <GLES/glext.h>
+#include <ios>
 
 #include "OpenGLESDispatch/DispatchTables.h"
 #include "OpenGLESDispatch/EGLDispatch.h"
-#include "aemu/base/containers/Lookup.h"
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/logging.h"
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
+#include "gfxstream/containers/Lookup.h"
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 namespace gl {
@@ -103,20 +99,18 @@ bool EmulatedEglWindowSurface::flushColorBuffer() {
     if (mAttachedColorBuffer->getWidth() != mWidth ||
         mAttachedColorBuffer->getHeight() != mHeight) {
         // XXX: should never happen - how this needs to be handled?
-        ERR("Dimensions do not match");
+        GFXSTREAM_ERROR("Dimensions do not match");
         return false;
     }
 
     if (!mDrawContext.get()) {
-        ERR("%p: Draw context is NULL", this);
+        GFXSTREAM_ERROR("%p: Draw context is NULL", this);
         return false;
     }
 
     GLenum resetStatus = s_gles2.glGetGraphicsResetStatusEXT();
     if (resetStatus != GL_NO_ERROR) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) <<
-                "Stream server aborting due to graphics reset. ResetStatus: " <<
-                std::hex << resetStatus;
+        GFXSTREAM_FATAL("Stream server aborting due to graphics reset: %x", resetStatus);
     }
 
     // Make the surface current
@@ -131,7 +125,7 @@ bool EmulatedEglWindowSurface::flushColorBuffer() {
                                   mSurface,
                                   mSurface,
                                   mDrawContext->getEGLContext())) {
-            ERR("Error making draw context current");
+            GFXSTREAM_ERROR("Error making draw context current");
             return false;
         }
     }
@@ -185,7 +179,7 @@ bool EmulatedEglWindowSurface::resize(unsigned int p_width, unsigned int p_heigh
                                              mConfig,
                                              pbufAttribs);
     if (mSurface == EGL_NO_SURFACE) {
-        ERR("Renderer error: failed to create/resize pbuffer!!");
+        GFXSTREAM_ERROR("Renderer error: failed to create/resize pbuffer!!");
         return false;
     }
 
@@ -208,7 +202,7 @@ HandleType EmulatedEglWindowSurface::getHndl() const {
 }
 
 template <class obj_t>
-static void saveHndlOrNull(obj_t obj, android::base::Stream* stream) {
+static void saveHndlOrNull(obj_t obj, gfxstream::Stream* stream) {
     if (obj) {
         stream->putBe32(obj->getHndl());
     } else {
@@ -216,7 +210,7 @@ static void saveHndlOrNull(obj_t obj, android::base::Stream* stream) {
     }
 }
 
-void EmulatedEglWindowSurface::onSave(android::base::Stream* stream) const {
+void EmulatedEglWindowSurface::onSave(gfxstream::Stream* stream) const {
     stream->putBe32(getHndl());
     saveHndlOrNull(mAttachedColorBuffer, stream);
     saveHndlOrNull(mReadContext, stream);
@@ -229,7 +223,7 @@ void EmulatedEglWindowSurface::onSave(android::base::Stream* stream) const {
 }
 
 std::unique_ptr<EmulatedEglWindowSurface> EmulatedEglWindowSurface::onLoad(
-        android::base::Stream* stream,
+        gfxstream::Stream* stream,
         EGLDisplay display,
         const ColorBufferMap& colorBuffers,
         const EmulatedEglContextMap& contexts) {
@@ -249,12 +243,12 @@ std::unique_ptr<EmulatedEglWindowSurface> EmulatedEglWindowSurface::onLoad(
     assert(surface);
     // fb is already locked by its caller
     if (colorBufferHndl) {
-        const auto* colorBufferRef = android::base::find(colorBuffers, colorBufferHndl);
+        const auto* colorBufferRef = gfxstream::base::find(colorBuffers, colorBufferHndl);
         assert(colorBufferRef);
         surface->mAttachedColorBuffer = colorBufferRef->cb;
     }
-    surface->mReadContext = android::base::findOrDefault(contexts, readCtx);
-    surface->mDrawContext = android::base::findOrDefault(contexts, drawCtx);
+    surface->mReadContext = gfxstream::base::findOrDefault(contexts, readCtx);
+    surface->mDrawContext = gfxstream::base::findOrDefault(contexts, drawCtx);
     return surface;
 }
 

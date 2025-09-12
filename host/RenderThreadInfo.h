@@ -20,7 +20,7 @@
 #include <memory>
 #include <unordered_set>
 
-#include "aemu/base/files/Stream.h"
+#include "render-utils/stream.h"
 
 #if GFXSTREAM_ENABLE_HOST_GLES
 #include "renderControl_dec/renderControl_dec.h"
@@ -28,10 +28,6 @@
 #endif
 
 #include "RenderThreadInfoVk.h"
-
-#if GFXSTREAM_ENABLE_HOST_MAGMA
-#include "RenderThreadInfoMagma.h"
-#endif
 
 namespace gfxstream {
 
@@ -56,8 +52,9 @@ struct RenderThreadInfo {
 #endif
 
     // The unique id of owner guest process of this render thread
-    uint64_t                        m_puid = 0;
-    std::optional<std::string>      m_processName;
+    uint64_t m_puid = 0;
+    std::atomic_bool m_shouldExit{false};
+    std::optional<std::string> m_processName;
 
 #if GFXSTREAM_ENABLE_HOST_GLES
     renderControl_decoder_context_t m_rcDec;
@@ -66,17 +63,13 @@ struct RenderThreadInfo {
 
     std::optional<vk::RenderThreadInfoVk> m_vkInfo;
 
-#if GFXSTREAM_ENABLE_HOST_MAGMA
-    std::optional<RenderThreadInfoMagma> m_magmaInfo;
-#endif
-
     // Whether this thread was used to perform composition.
     bool m_isCompositionThread = false;
 
     // Functions to save / load a snapshot
     // They must be called after Framebuffer snapshot
-    void onSave(android::base::Stream* stream);
-    bool onLoad(android::base::Stream* stream);
+    void onSave(gfxstream::Stream* stream);
+    bool onLoad(gfxstream::Stream* stream);
 
     // Sometimes we can load render thread info before
     // FrameBuffer repopulates the contexts.

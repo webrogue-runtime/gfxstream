@@ -14,7 +14,8 @@
 
 #include "CompressedImageInfo.h"
 
-#include "aemu/base/ArraySize.h"
+#include "gfxstream/ArraySize.h"
+#include "gfxstream/common/logging.h"
 #include "vulkan/VkFormatUtils.h"
 #include "vulkan/emulated_textures/shaders/DecompressionShaders.h"
 #include "vulkan/VkFormatUtils.h"
@@ -23,9 +24,6 @@
 namespace gfxstream {
 namespace vk {
 namespace {
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
 
 // Returns x / y, rounded up. E.g. ceil_div(7, 2) == 4
 // Note the potential integer overflow for large numbers.
@@ -67,7 +65,7 @@ VkImageView createDefaultImageView(VulkanDispatch* vk, VkDevice device, VkImage 
     VkImageView imageView;
     VkResult result = vk->vkCreateImageView(device, &imageViewInfo, nullptr, &imageView);
     if (result != VK_SUCCESS) {
-        WARN("GPU decompression: createDefaultImageView failed: %d", result);
+        GFXSTREAM_WARNING("GPU decompression: createDefaultImageView failed: %d", result);
         return VK_NULL_HANDLE;
     }
     return imageView;
@@ -164,7 +162,7 @@ bool imageWillBecomeReadable(const VkImageMemoryBarrier& barrier) {
     // TODO(gregschlom) This doesn't take into account that the GENERAL layout is both readable and
     //  writable, so this warning could incorrectly trigger some times.
     if (fromReadable && toWritable) {
-        WARN(
+        GFXSTREAM_WARNING(
             "Compressed image is being transitioned from readable (%s) to writable (%s). This may "
             "lead to unexpected results.",
             string_VkImageLayout(barrier.oldLayout), string_VkImageLayout(barrier.newLayout));
@@ -220,7 +218,7 @@ void checkValidAlignment(VkDeviceSize& n) {
     // Check that the alignment is a power of 2
     // http://www.graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
     if ((n & (n - 1))) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << "vkGetImageMemoryRequirements returned non-power-of-two alignment: " + std::to_string(n);
+        GFXSTREAM_FATAL("vkGetImageMemoryRequirements returned non-power-of-two alignment: %d", n);
     }
 }
 
@@ -464,7 +462,7 @@ bool CompressedImageInfo::decompressIfNeeded(VulkanDispatch* vk, VkCommandBuffer
 
     VkResult result = initializeDecompressionPipeline(vk, mDevice);
     if (result != VK_SUCCESS) {
-        WARN("Failed to initialize pipeline for texture decompression");
+        GFXSTREAM_WARNING("Failed to initialize pipeline for texture decompression");
         return false;
     }
 
@@ -561,43 +559,43 @@ VkBufferImageCopy2 CompressedImageInfo::getBufferImageCopy(
 
 // static
 VkImageCopy CompressedImageInfo::getCompressedMipmapsImageCopy(const VkImageCopy& origRegion,
-                                                               const CompressedImageInfo& srcImg,
-                                                               const CompressedImageInfo& dstImg,
-                                                               bool needEmulatedSrc,
-                                                               bool needEmulatedDst) {
+                                                               const CompressedImageInfo* srcImg,
+                                                               const CompressedImageInfo* dstImg) {
+    const bool needEmulatedSrc = (srcImg != nullptr);
+    const bool needEmulatedDst = (dstImg != nullptr);
     VkImageCopy region = origRegion;
     if (needEmulatedSrc) {
         uint32_t mipLevel = region.srcSubresource.mipLevel;
         region.srcSubresource.mipLevel = 0;
-        region.srcOffset.x /= srcImg.mBlock.width;
-        region.srcOffset.y /= srcImg.mBlock.height;
-        region.extent = srcImg.compressedMipmapPortion(region.extent, mipLevel);
+        region.srcOffset.x /= srcImg->mBlock.width;
+        region.srcOffset.y /= srcImg->mBlock.height;
+        region.extent = srcImg->compressedMipmapPortion(region.extent, mipLevel);
     }
     if (needEmulatedDst) {
         region.dstSubresource.mipLevel = 0;
-        region.dstOffset.x /= dstImg.mBlock.width;
-        region.dstOffset.y /= dstImg.mBlock.height;
+        region.dstOffset.x /= dstImg->mBlock.width;
+        region.dstOffset.y /= dstImg->mBlock.height;
     }
     return region;
 }
 
 VkImageCopy2 CompressedImageInfo::getCompressedMipmapsImageCopy(const VkImageCopy2& origRegion,
-                                                                const CompressedImageInfo& srcImg,
-                                                                const CompressedImageInfo& dstImg,
-                                                                bool needEmulatedSrc,
-                                                                bool needEmulatedDst) {
+                                                                const CompressedImageInfo* srcImg,
+                                                                const CompressedImageInfo* dstImg) {
+    const bool needEmulatedSrc = (srcImg != nullptr);
+    const bool needEmulatedDst = (dstImg != nullptr);
     VkImageCopy2 region = origRegion;
     if (needEmulatedSrc) {
         uint32_t mipLevel = region.srcSubresource.mipLevel;
         region.srcSubresource.mipLevel = 0;
-        region.srcOffset.x /= srcImg.mBlock.width;
-        region.srcOffset.y /= srcImg.mBlock.height;
-        region.extent = srcImg.compressedMipmapPortion(region.extent, mipLevel);
+        region.srcOffset.x /= srcImg->mBlock.width;
+        region.srcOffset.y /= srcImg->mBlock.height;
+        region.extent = srcImg->compressedMipmapPortion(region.extent, mipLevel);
     }
     if (needEmulatedDst) {
         region.dstSubresource.mipLevel = 0;
-        region.dstOffset.x /= dstImg.mBlock.width;
-        region.dstOffset.y /= dstImg.mBlock.height;
+        region.dstOffset.x /= dstImg->mBlock.width;
+        region.dstOffset.y /= dstImg->mBlock.height;
     }
     return region;
 }
@@ -658,7 +656,7 @@ VkResult CompressedImageInfo::initializeDecompressionPipeline(VulkanDispatch* vk
 
     mDecompPipeline = mPipelineManager->get(mCompressedFormat, mImageType);
     if (mDecompPipeline == nullptr) {
-        ERR("Failed to initialize GPU decompression pipeline");
+        GFXSTREAM_ERROR("Failed to initialize GPU decompression pipeline");
         return VK_ERROR_INITIALIZATION_FAILED;
     }
 
@@ -676,7 +674,7 @@ VkResult CompressedImageInfo::initializeDecompressionPipeline(VulkanDispatch* vk
     VkResult result =
         vk->vkCreateDescriptorPool(device, &dsPoolInfo, nullptr, &mDecompDescriptorPool);
     if (result != VK_SUCCESS) {
-        ERR("GPU decompression error. vkCreateDescriptorPool failed: %d", result);
+        GFXSTREAM_ERROR("GPU decompression error. vkCreateDescriptorPool failed: %d", result);
         return result;
     }
 
@@ -691,7 +689,7 @@ VkResult CompressedImageInfo::initializeDecompressionPipeline(VulkanDispatch* vk
     mDecompDescriptorSets.resize(mMipLevels);
     result = vk->vkAllocateDescriptorSets(device, &dsInfo, mDecompDescriptorSets.data());
     if (result != VK_SUCCESS) {
-        ERR("GPU decompression error. vkAllocateDescriptorSets failed: %d", result);
+        GFXSTREAM_ERROR("GPU decompression error. vkAllocateDescriptorSets failed: %d", result);
         return result;
     }
 
@@ -805,7 +803,7 @@ VkExtent3D CompressedImageInfo::compressedMipmapPortion(const VkExtent3D& origEx
         .height = std::min(ceil_div(origExtent.height, mBlock.height), maxExtent.height),
         // TODO(gregschlom): this is correct for 2DArrays, but incorrect for 3D images. We should
         // take the image type into account to do the right thing here. See also
-        // https://android-review.git.corp.google.com/c/device/generic/vulkan-cereal/+/2458549/comment/cfc7480f_912dd378/
+        // https://android-review.googlesource.com/c/device/generic/vulkan-cereal/+/2458549/comment/cfc7480f_912dd378/
         .depth = origExtent.depth,
     };
 }

@@ -20,11 +20,11 @@
 #include "VulkanDispatch.h"
 #include "VulkanHandles.h"
 #include "VulkanStream.h"
-#include "aemu/base/ThreadAnnotations.h"
-#include "aemu/base/containers/HybridEntityManager.h"
-#include "aemu/base/containers/Lookup.h"
-#include "aemu/base/synchronization/ConditionVariable.h"
-#include "aemu/base/synchronization/Lock.h"
+#include "gfxstream/ThreadAnnotations.h"
+#include "gfxstream/containers/HybridEntityManager.h"
+#include "gfxstream/containers/Lookup.h"
+#include "gfxstream/synchronization/ConditionVariable.h"
+#include "gfxstream/synchronization/Lock.h"
 
 namespace gfxstream {
 namespace vk {
@@ -36,8 +36,13 @@ enum BoxedHandleTypeTag {
 
     GOLDFISH_VK_LIST_HANDLE_TYPES_BY_STAGE(DEFINE_BOXED_HANDLE_TYPE_TAG)
 
+    // extra command for snapshot purpose
+    Tag_VkBindMemory,
+    Tag_VkMapMemory,
+    Tag_VkCmdOp,
+    Tag_VkUpdateDescriptorSets,
     // additional generic tag
-    Tag_VkGeneric = 1001,
+    Tag_VkGeneric = 0xFF,
 };
 
 using BoxedHandle = uint64_t;
@@ -45,8 +50,8 @@ using UnboxedHandle = uint64_t;
 
 struct OrderMaintenanceInfo {
     uint32_t sequenceNumber = 0;
-    android::base::Lock lock;
-    android::base::ConditionVariable cv;
+    gfxstream::base::Lock lock;
+    gfxstream::base::ConditionVariable cv;
 
     uint32_t refcount = 1;
 
@@ -67,7 +72,7 @@ inline void releaseOrderMaintInfo(OrderMaintenanceInfo* ord) {
 
 class BoxedHandleInfo {
    public:
-    UnboxedHandle underlying;
+    UnboxedHandle underlying{0};
     VulkanDispatch* dispatch = nullptr;
     bool ownDispatch = false;
     OrderMaintenanceInfo* ordMaintInfo = nullptr;
@@ -84,7 +89,7 @@ class BoxedHandleManager {
     // We use 16000 as the max number of live handles to track; we don't
     // expect the system to go over 16000 total live handles, outside some
     // dEQP object management tests.
-    using Store = android::base::HybridEntityManager<16000, BoxedHandle, BoxedHandleInfo>;
+    using Store = gfxstream::base::HybridEntityManager<16000, BoxedHandle, BoxedHandleInfo>;
 
     BoxedHandle add(const BoxedHandleInfo& item, BoxedHandleTypeTag tag);
 
@@ -104,10 +109,12 @@ class BoxedHandleManager {
 
     void clear();
 
-   private:
-    mutable Store mStore;
+    uint64_t getHandlesCount() const;
 
-    std::mutex mMutex;
+   private:
+    Store mStore;
+
+    mutable std::mutex mMutex;
     std::unordered_map<UnboxedHandle, BoxedHandle> mReverseMap GUARDED_BY(mMutex);
 
     struct DelayedRemove {

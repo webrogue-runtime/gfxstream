@@ -18,7 +18,8 @@
 #include "OpenGLESDispatch/DispatchTables.h"
 #include "OpenGLESDispatch/EGLDispatch.h"
 #include "TextureDraw.h"
-#include "host-common/logging.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/host/display_operations.h"
 
 namespace gfxstream {
 namespace gl {
@@ -55,10 +56,23 @@ std::shared_future<void> DisplayGl::post(const Post& post) {
                                              post.frameHeight);
         } else if (layer.overlayOptions) {
             if (hasDrawLayer) {
-                ERR("Cannot mix colorBuffer.postLayer with postWithOverlay!");
+                GFXSTREAM_ERROR("Cannot mix colorBuffer.postLayer with postWithOverlay!");
             }
+
+            // TODO: Use correct displayId
+            float displayColorTransform[16];
+            if (get_gfxstream_multi_display_operations().get_color_transform_matrix(
+                    0, displayColorTransform)) {
+                const float identityMatrix[16] = {
+                    1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+                    0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+                };
+                memcpy(displayColorTransform, identityMatrix, sizeof(displayColorTransform));
+            }
+
             layer.colorBuffer->glOpPostViewportScaledWithOverlay(
-                layer.overlayOptions->rotation, layer.overlayOptions->dx, layer.overlayOptions->dy);
+                layer.overlayOptions->rotation, layer.overlayOptions->dx, layer.overlayOptions->dy,
+                displayColorTransform);
         }
     }
     if (hasDrawLayer) {
@@ -85,6 +99,8 @@ void DisplayGl::clear() {
 #ifndef __linux__
     s_gles2.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     s_egl.eglSwapBuffers(surfaceGl->mDisplay, surfaceGl->mSurface);
+#else
+    (void)surfaceGl;
 #endif
 }
 

@@ -1,3 +1,17 @@
+// Copyright 2025 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either expresso or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "CompositorVk.h"
 
 #include <string.h>
@@ -7,15 +21,12 @@
 #include <optional>
 
 #include "gfxstream/host/Tracing.h"
-#include "host-common/logging.h"
+#include "gfxstream/common/logging.h"
 #include "vulkan/vk_enum_string_helper.h"
-#include "vulkan/vk_util.h"
+#include "vulkan/VkUtils.h"
 
 namespace gfxstream {
 namespace vk {
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
 
 namespace CompositorVkShader {
 #include "vulkan/CompositorFragmentShader.h"
@@ -38,8 +49,8 @@ const BorrowedImageInfoVk* getInfoOrAbort(const std::unique_ptr<BorrowedImageInf
         return imageVk;
     }
 
-    GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-        << "CompositorVk did not find BorrowedImageInfoVk";
+    GFXSTREAM_FATAL("CompositorVk did not find BorrowedImageInfoVk");
+    return nullptr;
 }
 
 struct Vertex {
@@ -107,9 +118,9 @@ CompositorVk::RenderTarget::RenderTarget(const VulkanDispatch& vk, VkDevice vkDe
       m_width(width),
       m_height(height) {
     if (vkImageView == VK_NULL_HANDLE) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "CompositorVk found empty image view handle when creating RenderTarget. Image: "
-            << m_vkImage << " Dimensions: " << m_width << "x" << m_height;
+        GFXSTREAM_FATAL("CompositorVk found empty image view handle when creating RenderTarget. "
+                        "VkImage:%p w:%" PRIu32 " h:%" PRIu32,
+                        m_vkImage, m_width, m_height);
     }
 
     const VkFramebufferCreateInfo framebufferCi = {
@@ -133,7 +144,7 @@ CompositorVk::RenderTarget::~RenderTarget() {
 
 std::unique_ptr<CompositorVk> CompositorVk::create(
     const VulkanDispatch& vk, VkDevice vkDevice, VkPhysicalDevice vkPhysicalDevice, VkQueue vkQueue,
-    std::shared_ptr<android::base::Lock> queueLock, uint32_t queueFamilyIndex,
+    std::shared_ptr<gfxstream::base::Lock> queueLock, uint32_t queueFamilyIndex,
     uint32_t maxFramesInFlight, DebugUtilsHelper debugUtils) {
     auto res = std::unique_ptr<CompositorVk>(new CompositorVk(vk, vkDevice, vkPhysicalDevice,
                                                               vkQueue, queueLock, queueFamilyIndex,
@@ -152,7 +163,7 @@ std::unique_ptr<CompositorVk> CompositorVk::create(
 
 CompositorVk::CompositorVk(const VulkanDispatch& vk, VkDevice vkDevice,
                            VkPhysicalDevice vkPhysicalDevice, VkQueue vkQueue,
-                           std::shared_ptr<android::base::Lock> queueLock,
+                           std::shared_ptr<gfxstream::base::Lock> queueLock,
                            uint32_t queueFamilyIndex, uint32_t maxFramesInFlight,
                            DebugUtilsHelper debugUtilsHelper)
     : CompositorVkBase(vk, vkDevice, vkPhysicalDevice, vkQueue, queueLock, queueFamilyIndex,
@@ -162,7 +173,7 @@ CompositorVk::CompositorVk(const VulkanDispatch& vk, VkDevice vkDevice,
 
 CompositorVk::~CompositorVk() {
     {
-        android::base::AutoLock lock(*m_vkQueueLock);
+        gfxstream::base::AutoLock lock(*m_vkQueueLock);
         VK_CHECK(vk_util::waitForVkQueueIdleWithRetry(m_vk, m_vkQueue));
     }
     if (m_defaultImage.m_vkImageView != VK_NULL_HANDLE) {
@@ -198,10 +209,8 @@ CompositorVk::~CompositorVk() {
 }
 
 void CompositorVk::setUpGraphicsPipeline() {
-    const std::vector<uint32_t> vertSpvBuff(CompositorVkShader::compositorVertexShader,
-                                            std::end(CompositorVkShader::compositorVertexShader));
-    const std::vector<uint32_t> fragSpvBuff(CompositorVkShader::compositorFragmentShader,
-                                            std::end(CompositorVkShader::compositorFragmentShader));
+    const std::vector<uint32_t> vertSpvBuff = CompositorVkShader::compositorVertexShader;
+    const std::vector<uint32_t> fragSpvBuff = CompositorVkShader::compositorFragmentShader;
     const auto vertShaderMod = createShaderModule(m_vk, m_vkDevice, vertSpvBuff);
     const auto fragShaderMod = createShaderModule(m_vk, m_vkDevice, fragSpvBuff);
 
@@ -579,8 +588,7 @@ void CompositorVk::setUpDefaultImage() {
     auto memoryTypeIndexOpt =
         findMemoryType(imageMemoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (!memoryTypeIndexOpt) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "CompositorVk failed to find memory type for default image.";
+        GFXSTREAM_FATAL("CompositorVk failed to find memory type for default image.");
     }
 
     const VkMemoryAllocateInfo imageMemoryAllocInfo = {
@@ -819,7 +827,7 @@ std::optional<std::tuple<VkBuffer, VkDeviceMemory>> CompositorVk::createBuffer(
     m_vk.vkGetPhysicalDeviceMemoryProperties(m_vkPhysicalDevice, &physicalMemProperties);
     auto maybeMemoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, memProperty);
     if (!maybeMemoryTypeIndex.has_value()) {
-        ERR("Failed to find memory type for creating buffer.");
+        GFXSTREAM_ERROR("Failed to find memory type for creating buffer.");
         m_vk.vkDestroyBuffer(m_vkDevice, resBuffer, nullptr);
         return std::nullopt;
     }
@@ -873,7 +881,7 @@ VkFormatFeatureFlags CompositorVk::getFormatFeatures(VkFormat format, VkImageTil
     } else if (tiling == VK_IMAGE_TILING_OPTIMAL) {
         formatFeatures = formatProperties.optimalTilingFeatures;
     } else {
-        ERR("Unknown tiling:%#" PRIx64 ".", static_cast<uint64_t>(tiling));
+        GFXSTREAM_ERROR("Unknown tiling:%#" PRIx64 ".", static_cast<uint64_t>(tiling));
     }
     return formatFeatures;
 }
@@ -904,7 +912,8 @@ CompositorVk::RenderTarget* CompositorVk::getOrCreateRenderTargetInfo(
 bool CompositorVk::canCompositeFrom(const VkImageCreateInfo& imageCi) {
     VkFormatFeatureFlags formatFeatures = getFormatFeatures(imageCi.format, imageCi.tiling);
     if (!(formatFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
-        ERR("The format, %s, with tiling, %s, doesn't support the "
+        GFXSTREAM_ERROR(
+            "The format, %s, with tiling, %s, doesn't support the "
             "VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT feature. All supported features are %s.",
             string_VkFormat(imageCi.format), string_VkImageTiling(imageCi.tiling),
             string_VkFormatFeatureFlags(formatFeatures).c_str());
@@ -916,21 +925,24 @@ bool CompositorVk::canCompositeFrom(const VkImageCreateInfo& imageCi) {
 bool CompositorVk::canCompositeTo(const VkImageCreateInfo& imageCi) {
     VkFormatFeatureFlags formatFeatures = getFormatFeatures(imageCi.format, imageCi.tiling);
     if (!(formatFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) {
-        ERR("The format, %s, with tiling, %s, doesn't support the "
+        GFXSTREAM_ERROR(
+            "The format, %s, with tiling, %s, doesn't support the "
             "VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT feature. All supported features are %s.",
             string_VkFormat(imageCi.format), string_VkImageTiling(imageCi.tiling),
             string_VkFormatFeatureFlags(formatFeatures).c_str());
         return false;
     }
     if (!(imageCi.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) {
-        ERR("The VkImage is not created with the VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT usage flag. "
+        GFXSTREAM_ERROR(
+            "The VkImage is not created with the VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT usage flag. "
             "The usage flags are %s.",
             string_VkImageUsageFlags(imageCi.usage).c_str());
         return false;
     }
 
     if (m_formatResources.find(imageCi.format) == m_formatResources.end()) {
-        ERR("The format of the image, %s, is not supported by the CompositorVk as the render "
+        GFXSTREAM_ERROR(
+            "The format of the image, %s, is not supported by the CompositorVk as the render "
             "target.",
             string_VkFormat(imageCi.format));
         return false;
@@ -944,9 +956,9 @@ void CompositorVk::buildCompositionVk(const CompositionRequest& compositionReque
 
     auto formatResourcesIt = m_formatResources.find(targetImage->imageCreateInfo.format);
     if (formatResourcesIt == m_formatResources.end()) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "CompositorVk did not find format resource for format "
-            << targetImage->imageCreateInfo.format;
+        const std::string formatString = string_VkFormat(targetImage->imageCreateInfo.format);
+        GFXSTREAM_FATAL("CompositorVk did not find format resources for VkFormat:%s",
+                        formatString.c_str());
     }
     const auto& formatResources = formatResourcesIt->second;
 
@@ -1034,7 +1046,7 @@ void CompositorVk::buildCompositionVk(const CompositionRequest& compositionReque
                 texCoordScaleY *= -1.0f;
                 break;
             default:
-                ERR("Unknown transform:%d", static_cast<int>(layer.props.transform));
+                GFXSTREAM_ERROR("Unknown transform:%d", static_cast<int>(layer.props.transform));
                 break;
         }
 
@@ -1051,6 +1063,8 @@ void CompositorVk::buildCompositionVk(const CompositionRequest& compositionReque
                         glm::scale(glm::mat4(1.0f),
                                    glm::vec3(texCoordScaleX, texCoordScaleY, 1.0f)) *
                         glm::rotate(glm::mat4(1.0f), texcoordRotation, glm::vec3(0.0f, 0.0f, 1.0f)),
+                    //TODO(b/420586022): Support color transformation on host composition
+                    .colorTransform = glm::mat4(1.0f),
                     .mode = glm::uvec4(static_cast<uint32_t>(layer.props.composeMode), 0, 0, 0),
                     .alpha =
                         glm::vec4(layer.props.alpha, layer.props.alpha, layer.props.alpha,
@@ -1069,8 +1083,7 @@ void CompositorVk::buildCompositionVk(const CompositionRequest& compositionReque
 
         } else {
             if (sourceImage == nullptr) {
-                GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                    << "CompositorVk failed to find sourceImage.";
+                GFXSTREAM_FATAL("CompositorVk failed to find sourceImage.");
             }
             descriptorSetContents.binding0.sampledImageId = sourceImage->id;
             descriptorSetContents.binding0.sampledImageView = sourceImage->imageView;
@@ -1096,8 +1109,7 @@ CompositorVk::CompositionFinishedWaitable CompositorVk::compose(
 
     // Grab and wait for the next available resources.
     if (m_availableFrameResources.empty()) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "CompositorVk failed to get PerFrameResources.";
+        GFXSTREAM_FATAL("CompositorVk failed to get PerFrameResources.");
     }
     auto frameResourceFuture = std::move(m_availableFrameResources.front());
     m_availableFrameResources.pop_front();
@@ -1310,7 +1322,7 @@ CompositorVk::CompositionFinishedWaitable CompositorVk::compose(
     };
 
     {
-        android::base::AutoLock lock(*m_vkQueueLock);
+        gfxstream::base::AutoLock lock(*m_vkQueueLock);
         VK_CHECK(m_vk.vkQueueSubmit(m_vkQueue, 1, &submitInfo, composeCompleteFence));
     }
 
@@ -1359,7 +1371,8 @@ bool operator==(const CompositorVkBase::DescriptorSetContents& lhs,
                     lhs.binding1.alpha,              //
                     lhs.binding1.color,              //
                     lhs.binding1.positionTransform,  //
-                    lhs.binding1.texCoordTransform)  //
+                    lhs.binding1.texCoordTransform,  //
+                    lhs.binding1.colorTransform)     //
                      ==                              //
            std::tie(rhs.binding0.sampledImageId,     //
                     rhs.binding0.sampledImageView,   //
@@ -1367,7 +1380,8 @@ bool operator==(const CompositorVkBase::DescriptorSetContents& lhs,
                     rhs.binding1.alpha,              //
                     rhs.binding1.color,              //
                     rhs.binding1.positionTransform,  //
-                    rhs.binding1.texCoordTransform);
+                    rhs.binding1.texCoordTransform,  //
+                    rhs.binding1.colorTransform);
 }
 
 bool operator==(const CompositorVkBase::FrameDescriptorSetsContents& lhs,
@@ -1384,9 +1398,9 @@ void CompositorVk::updateDescriptorSetsIfChanged(
     const uint32_t numRequestedLayers =
         static_cast<uint32_t>(descriptorSetsContents.descriptorSets.size());
     if (numRequestedLayers > kMaxLayersPerFrame) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "CompositorVk can't compose more than " << kMaxLayersPerFrame
-            << " layers. layers asked: " << numRequestedLayers;
+        GFXSTREAM_FATAL("CompositorVk can't compose more than %" PRIu32
+                        " layers. layers asked: %" PRIu32,
+                        kMaxLayersPerFrame, numRequestedLayers);
         return;
     }
 

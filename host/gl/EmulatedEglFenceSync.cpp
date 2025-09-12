@@ -21,18 +21,18 @@
 #include "OpenGLESDispatch/EGLDispatch.h"
 #include "RenderThreadInfoGl.h"
 #include "StalePtrRegistry.h"
-#include "aemu/base/containers/Lookup.h"
-#include "aemu/base/containers/StaticMap.h"
-#include "aemu/base/files/StreamSerializing.h"
-#include "aemu/base/synchronization/Lock.h"
+#include "gfxstream/containers/Lookup.h"
+#include "gfxstream/containers/StaticMap.h"
+#include "gfxstream/host/stream_utils.h"
+#include "gfxstream/synchronization/Lock.h"
 
 namespace gfxstream {
 namespace gl {
 namespace {
 
-using android::base::AutoLock;
-using android::base::Lock;
-using android::base::StaticMap;
+using gfxstream::base::AutoLock;
+using gfxstream::base::Lock;
+using gfxstream::base::StaticMap;
 
 // Timeline class is meant to delete native fences after the
 // sync device has incremented the timeline.  We assume a
@@ -97,7 +97,7 @@ std::unique_ptr<EmulatedEglFenceSync> EmulatedEglFenceSync::create(
         bool destroyWhenSignaled) {
     auto sync = s_egl.eglCreateSyncKHR(display, EGL_SYNC_FENCE_KHR, nullptr);
     if (sync == EGL_NO_SYNC_KHR) {
-        ERR("Failed to create EGL fence sync: %d", s_egl.eglGetError());
+        GFXSTREAM_ERROR("Failed to create EGL fence sync: %d", s_egl.eglGetError());
         return nullptr;
     }
 
@@ -197,13 +197,13 @@ void EmulatedEglFenceSync::removeFromRegistry() {
 }
 
 // static
-void EmulatedEglFenceSync::onSave(android::base::Stream* stream) {
+void EmulatedEglFenceSync::onSave(gfxstream::Stream* stream) {
     sFenceRegistry()->makeCurrentPtrsStale();
     sFenceRegistry()->onSave(stream);
 }
 
 // static
-void EmulatedEglFenceSync::onLoad(android::base::Stream* stream) {
+void EmulatedEglFenceSync::onLoad(gfxstream::Stream* stream) {
     sFenceRegistry()->onLoad(stream);
 }
 

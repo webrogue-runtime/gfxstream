@@ -20,23 +20,14 @@
 
 #include "GLcommon/GLEScontext.h"
 #include "GLcommon/TranslatorIfaces.h"
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/containers/Lookup.h"
-#include "aemu/base/files/PathUtils.h"
-#include "aemu/base/files/StreamSerializing.h"
-#include "host-common/crash_reporter.h"
-#include "host-common/logging.h"
-#include "snapshot/TextureLoader.h"
-#include "snapshot/TextureSaver.h"
-
-using android::snapshot::ITextureSaver;
-using android::snapshot::ITextureLoader;
-using android::snapshot::ITextureSaverPtr;
-using android::snapshot::ITextureLoaderPtr;
-using android::snapshot::ITextureLoaderWPtr;
+#include "gfxstream/containers/Lookup.h"
+#include "gfxstream/files/PathUtils.h"
+#include "gfxstream/host/stream_utils.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/common/logging.h"
 
 NameSpace::NameSpace(NamedObjectType p_type, GlobalNameSpace *globalNameSpace,
-        android::base::Stream* stream, const ObjectData::loadObject_t& loadObject) :
+        gfxstream::Stream* stream, const ObjectData::loadObject_t& loadObject) :
     m_type(p_type),
     m_globalNameSpace(globalNameSpace) {
     if (!stream) return;
@@ -54,7 +45,7 @@ NameSpace::NameSpace(NamedObjectType p_type, GlobalNameSpace *globalNameSpace,
             // share groups
             TextureData* texData = (TextureData*)data.get();
             if (!texData->getGlobalName()) {
-                GL_LOG("%p: texture data %p is 0 texture.", this, texData);
+                GFXSTREAM_DEBUG("%p: texture data %p is 0 texture.", this, texData);
                 continue;
             }
 
@@ -73,11 +64,10 @@ NameSpace::~NameSpace() {
 
 void NameSpace::postLoad(const ObjectData::getObjDataPtr_t& getObjDataPtr) {
     for (const auto& objData : m_objectDataMap) {
-        GL_LOG("%p: try to load object %llu", this, objData.first);
+        GFXSTREAM_DEBUG("%p: try to load object %llu", this, objData.first);
         if (!objData.second) {
             // bug: 130631787
-            // emugl::emugl_crash_reporter(
-            //         "Fatal: null object data ptr on restore\n");
+            // GFXSTREAM_FATAL("Fatal: null object data ptr on restore\n");
             continue;
         }
         objData.second->postLoad(getObjDataPtr);
@@ -89,21 +79,19 @@ void NameSpace::touchTextures() {
     for (const auto& obj : m_objectDataMap) {
         TextureData* texData = (TextureData*)obj.second.get();
         if (!texData->needRestore()) {
-            GL_LOG("%p: texture data %p does not need restore", this, texData);
+            GFXSTREAM_DEBUG("%p: texture data %p does not need restore", this, texData);
             continue;
         }
         const SaveableTexturePtr& saveableTexture = texData->getSaveableTexture();
         if (!saveableTexture.get()) {
-            GL_LOG("%p: warning: no saveableTexture for texture data %p", this, texData);
+            GFXSTREAM_DEBUG("%p: warning: no saveableTexture for texture data %p", this, texData);
             continue;
         }
 
         NamedObjectPtr texNamedObj = saveableTexture->getGlobalObject();
         if (!texNamedObj) {
-            GL_LOG("%p: fatal: global object null for texture data %p", this, texData);
-            emugl::emugl_crash_reporter(
-                    "fatal: null global texture object in "
-                    "NameSpace::touchTextures");
+            GFXSTREAM_DEBUG("%p: fatal: global object null for texture data %p", this, texData);
+            GFXSTREAM_FATAL("Null global texture object in NameSpace::touchTextures");
         }
         setGlobalObject(obj.first, texNamedObj);
         texData->setGlobalName(texNamedObj->getGlobalName());
@@ -153,7 +141,7 @@ void NameSpace::preSave(GlobalNameSpace *globalNameSpace) {
     }
 }
 
-void NameSpace::onSave(android::base::Stream* stream) {
+void NameSpace::onSave(gfxstream::Stream* stream) {
     stream->putBe32(m_objectDataMap.size());
     for (const auto& obj : m_objectDataMap) {
         stream->putBe64(obj.first);
@@ -298,15 +286,14 @@ void NameSpace::setObjectData(ObjectLocalName p_localName,
 
 void GlobalNameSpace::preSaveAddEglImage(EglImage* eglImage) {
     if (!eglImage->globalTexObj) {
-        GL_LOG("%p: egl image %p with null texture object", this, eglImage);
-        emugl::emugl_crash_reporter(
-                "Fatal: egl image with null texture object\n");
+        GFXSTREAM_DEBUG("%p: egl image %p with null texture object", this, eglImage);
+        GFXSTREAM_FATAL("Fatal: egl image with null texture object\n");
     }
     unsigned int globalName = eglImage->globalTexObj->getGlobalName();
-    android::base::AutoLock lock(m_lock);
+    gfxstream::base::AutoLock lock(m_lock);
 
     if (!globalName) {
-        GL_LOG("%p: egl image %p has 0 texture object", this, eglImage);
+        GFXSTREAM_DEBUG("%p: egl image %p has 0 texture object", this, eglImage);
         return;
     }
 
@@ -320,11 +307,11 @@ void GlobalNameSpace::preSaveAddEglImage(EglImage* eglImage) {
 }
 
 void GlobalNameSpace::preSaveAddTex(TextureData* texture) {
-    android::base::AutoLock lock(m_lock);
+    gfxstream::base::AutoLock lock(m_lock);
     const auto& saveableTexIt = m_textureMap.find(texture->getGlobalName());
 
     if (!texture->getGlobalName()) {
-        GL_LOG("%p: texture data %p is 0 texture", this, texture);
+        GFXSTREAM_DEBUG("%p: texture data %p is 0 texture", this, texture);
         return;
     }
 
@@ -338,8 +325,8 @@ void GlobalNameSpace::preSaveAddTex(TextureData* texture) {
     }
 }
 
-void GlobalNameSpace::onSave(android::base::Stream* stream,
-                             const ITextureSaverPtr& textureSaver,
+void GlobalNameSpace::onSave(gfxstream::Stream* stream,
+                             const gfxstream::ITextureSaverPtr& textureSaver,
                              SaveableTexture::saver_t saver) {
 #if SNAPSHOT_PROFILE > 1
     int cleanTexs = 0;
@@ -352,7 +339,7 @@ void GlobalNameSpace::onSave(android::base::Stream* stream,
             , &cleanTexs, &dirtyTexs
 #endif // SNAPSHOT_PROFILE > 1
                 ](
-                    android::base::Stream* stream,
+                    gfxstream::Stream* stream,
                     const std::pair<const unsigned int, SaveableTexturePtr>&
                             tex) {
                 stream->putBe32(tex.first);
@@ -365,8 +352,8 @@ void GlobalNameSpace::onSave(android::base::Stream* stream,
 #endif // SNAPSHOT_PROFILE > 1
                 textureSaver->saveTexture(
                         tex.first,
-                        [saver, &tex](android::base::Stream* stream,
-                                      ITextureSaver::Buffer* buffer) {
+                        [saver, &tex](gfxstream::Stream* stream,
+                                      gfxstream::ITextureSaver::Buffer* buffer) {
                             if (!tex.second.get()) return;
                             saver(tex.second.get(), stream, buffer);
                         });
@@ -378,21 +365,18 @@ void GlobalNameSpace::onSave(android::base::Stream* stream,
 #endif // SNAPSHOT_PROFILE > 1
 }
 
-void GlobalNameSpace::onLoad(android::base::Stream* stream,
-                             const ITextureLoaderWPtr& textureLoaderWPtr,
+void GlobalNameSpace::onLoad(gfxstream::Stream* stream,
+                             const gfxstream::ITextureLoaderWPtr& textureLoaderWPtr,
                              SaveableTexture::creator_t creator) {
-    const ITextureLoaderPtr textureLoader = textureLoaderWPtr.lock();
+    const gfxstream::ITextureLoaderPtr textureLoader = textureLoaderWPtr.lock();
     assert(m_textureMap.size() == 0);
     if (!textureLoader->start()) {
-        fprintf(stderr,
-                "Error: texture file unsupported version or corrupted.\n");
-        emugl::emugl_crash_reporter(
-                "Error: texture file unsupported version or corrupted.\n");
+        GFXSTREAM_FATAL("Texture file unsupported version or corrupted.\n");
         return;
     }
     loadCollection(
             stream, &m_textureMap,
-            [this, creator, textureLoaderWPtr](android::base::Stream* stream) {
+            [this, creator, textureLoaderWPtr](gfxstream::Stream* stream) {
                 unsigned int globalName = stream->getBe32();
                 // A lot of function wrapping happens here.
                 // When touched, saveableTexture triggers
@@ -407,7 +391,7 @@ void GlobalNameSpace::onLoad(android::base::Stream* stream,
                             textureLoader->loadTexture(
                                     globalName,
                                     [saveableTexture](
-                                            android::base::Stream* stream) {
+                                            gfxstream::Stream* stream) {
                                         saveableTexture->loadFromStream(stream);
                                     });
                         });
@@ -418,16 +402,25 @@ void GlobalNameSpace::onLoad(android::base::Stream* stream,
     m_backgroundLoader =
         std::make_shared<GLBackgroundLoader>(
             textureLoaderWPtr, *m_eglIface, *m_glesIface, m_textureMap);
-    textureLoader->acquireLoaderThread(m_backgroundLoader);
+
+    textureLoader->setAsyncUseCallbacks(
+        gfxstream::ITextureLoader::AsyncUseCallbacks{
+            .interrupt = [loader = m_backgroundLoader]() {
+                loader->interrupt();
+            },
+            .join = [loader = m_backgroundLoader]() {
+                loader->wait(nullptr);
+            },
+        });
 }
 
 void GlobalNameSpace::clearTextureMap() {
     decltype(m_textureMap)().swap(m_textureMap);
 }
 
-void GlobalNameSpace::postLoad(android::base::Stream* stream) {
+void GlobalNameSpace::postLoad(gfxstream::Stream* stream) {
     m_backgroundLoader->start();
-    m_backgroundLoader.reset(); // leave it to TextureLoader
+    m_backgroundLoader.reset();
 }
 
 const SaveableTexturePtr& GlobalNameSpace::getSaveableTextureFromLoad(

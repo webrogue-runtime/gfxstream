@@ -13,11 +13,12 @@
 // limitations under the License.
 #pragma once
 
-#include "aemu/base/threads/FunctorThread.h"
-#include "aemu/base/synchronization/MessageChannel.h"
-
 #include <inttypes.h>
+
 #include <functional>
+#include <thread>
+
+#include "gfxstream/synchronization/MessageChannel.h"
 
 namespace gfxstream {
 
@@ -30,7 +31,7 @@ namespace gfxstream {
 // properly schedule presents
 // 2.
 class VsyncThread {
-public:
+   public:
     using Count = uint64_t;
     using VsyncTask = std::function<void(Count)>;
     VsyncThread(uint64_t vsyncPeriod);
@@ -71,9 +72,8 @@ private:
 
     uint64_t mPeriodNs = 0;
     uint64_t mCount = 0;
-    bool mExiting = false;
-    android::base::MessageChannel<VsyncThreadCommand, 128> mChannel;
-    android::base::FunctorThread mThread;
+    gfxstream::base::MessageChannel<VsyncThreadCommand, 128> mChannel;
+    std::thread mThread;
 };
 
 }  // namespace gfxstream

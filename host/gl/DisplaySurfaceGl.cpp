@@ -14,21 +14,17 @@
 
 #include "DisplaySurfaceGl.h"
 
-#include <vector>
-
 #include <stdio.h>
+
+#include <vector>
 
 #include "OpenGLESDispatch/DispatchTables.h"
 #include "OpenGLESDispatch/EGLDispatch.h"
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/logging.h"
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 namespace gl {
 namespace {
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
 
 struct PreviousContextInfo {
     EGLContext context = EGL_NO_CONTEXT;
@@ -51,16 +47,13 @@ class DisplaySurfaceGlContextHelper : public ContextHelper {
           mSurface(surface),
           mContext(context) {
         if (mDisplay == EGL_NO_DISPLAY) {
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                << "DisplaySurfaceGlContextHelper created with no display?";
+            GFXSTREAM_FATAL("DisplaySurfaceGlContextHelper created with no display?");
         }
         if (mSurface == EGL_NO_SURFACE) {
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                << "DisplaySurfaceGlContextHelper created with no surface?";
+            GFXSTREAM_FATAL("DisplaySurfaceGlContextHelper created with no surface?");
         }
         if (mContext == EGL_NO_CONTEXT) {
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                << "DisplaySurfaceGlContextHelper created with no context?";
+            GFXSTREAM_FATAL("DisplaySurfaceGlContextHelper created with no context?");
         }
     }
 
@@ -77,15 +70,18 @@ class DisplaySurfaceGlContextHelper : public ContextHelper {
 
         if (needsUpdate) {
             if (!previousContexts.empty()) {
-                ERR("DisplaySurfaceGlContextHelper context was preempted by others, "
-                    "current=%p, needed=%p, thread=%p", currentContext, mContext, &sThreadState);
+                GFXSTREAM_ERROR(
+                    "DisplaySurfaceGlContextHelper context was preempted by others, "
+                    "current=%p, needed=%p, thread=%p",
+                    currentContext, mContext, &sThreadState);
                 // Fall through to attempt to recover from error.
             }
 
             if (!s_egl.eglMakeCurrent(mDisplay, mSurface, mSurface, mContext)) {
                 // b/284523053
                 // Legacy swiftshader logspam on exit with this line.
-                GL_LOG("Failed to make display surface context current: %d", s_egl.eglGetError());
+                GFXSTREAM_DEBUG("Failed to make display surface context current: %d",
+                                s_egl.eglGetError());
                 // Fall through to allow adding previous context to stack.
             }
         }
@@ -122,7 +118,7 @@ class DisplaySurfaceGlContextHelper : public ContextHelper {
                                   newContext.drawSurface,
                                   newContext.readSurface,
                                   newContext.context)) {
-            ERR("Failed to restore previous context: %d", s_egl.eglGetError());
+            GFXSTREAM_ERROR("Failed to restore previous context: %d", s_egl.eglGetError());
         }
     }
 
@@ -146,7 +142,7 @@ std::unique_ptr<DisplaySurfaceGl> DisplaySurfaceGl::createPbufferSurface(
         EGLint height) {
     EGLContext context = s_egl.eglCreateContext(display, config, shareContext, contextAttribs);
     if (context == EGL_NO_CONTEXT) {
-        ERR("Failed to create context for DisplaySurfaceGl.");
+        GFXSTREAM_ERROR("Failed to create context for DisplaySurfaceGl.");
         return nullptr;
     }
 
@@ -157,7 +153,7 @@ std::unique_ptr<DisplaySurfaceGl> DisplaySurfaceGl::createPbufferSurface(
     };
     EGLSurface surface = s_egl.eglCreatePbufferSurface(display, config, surfaceAttribs);
     if (surface == EGL_NO_SURFACE) {
-        ERR("Failed to create pbuffer surface for DisplaySurfaceGl.");
+        GFXSTREAM_ERROR("Failed to create pbuffer surface for DisplaySurfaceGl.");
         return nullptr;
     }
 
@@ -173,13 +169,13 @@ std::unique_ptr<DisplaySurfaceGl> DisplaySurfaceGl::createWindowSurface(
         FBNativeWindowType window) {
     EGLContext context = s_egl.eglCreateContext(display, config, shareContext, contextAttribs);
     if (context == EGL_NO_CONTEXT) {
-        ERR("Failed to create context for DisplaySurfaceGl.");
+        GFXSTREAM_ERROR("Failed to create context for DisplaySurfaceGl.");
         return nullptr;
     }
 
     EGLSurface surface = s_egl.eglCreateWindowSurface(display, config, window, nullptr);
     if (surface == EGL_NO_SURFACE) {
-        ERR("Failed to create window surface for DisplaySurfaceGl.");
+        GFXSTREAM_ERROR("Failed to create window surface for DisplaySurfaceGl.");
         return nullptr;
     }
 
@@ -188,7 +184,7 @@ std::unique_ptr<DisplaySurfaceGl> DisplaySurfaceGl::createWindowSurface(
 
 bool DisplaySurfaceGl::bindContext() const {
     if (!s_egl.eglMakeCurrent(mDisplay, mSurface, mSurface, mContext)) {
-        ERR("Failed to make display surface context current: %d", s_egl.eglGetError());
+        GFXSTREAM_ERROR("Failed to make display surface context current: %d", s_egl.eglGetError());
         return false;
     }
     return true;

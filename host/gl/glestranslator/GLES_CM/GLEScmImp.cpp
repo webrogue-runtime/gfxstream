@@ -21,24 +21,21 @@
 #endif
 
 #define GL_GLEXT_PROTOTYPES
-#include "GLEScmContext.h"
-#include "GLEScmValidate.h"
-#include "GLEScmUtils.h"
-#include <GLcommon/TextureUtils.h>
-
+#include <GLcommon/FramebufferData.h>
 #include <GLcommon/GLDispatch.h>
 #include <GLcommon/GLconversion_macros.h>
 #include <GLcommon/TextureData.h>
+#include <GLcommon/TextureUtils.h>
 #include <GLcommon/TranslatorIfaces.h>
-#include <GLcommon/FramebufferData.h>
-
-#include "host-common/crash_reporter.h"
-#include "host-common/logging.h"
+#include <stdio.h>
 
 #include <cmath>
 #include <unordered_map>
 
-#include <stdio.h>
+#include "GLEScmContext.h"
+#include "GLEScmUtils.h"
+#include "GLEScmValidate.h"
+#include "gfxstream/common/logging.h"
 
 #define DEBUG 0
 
@@ -69,7 +66,7 @@ static void setMaxGlesVersion(GLESVersion version);
 static void deleteGLESContext(GLEScontext* ctx);
 static void setShareGroup(GLEScontext* ctx,ShareGroupPtr grp);
 static GLEScontext* createGLESContext(int maj, int min,
-        GlobalNameSpace* globalNameSpace, android::base::Stream* stream);
+        GlobalNameSpace* globalNameSpace, gfxstream::Stream* stream);
 static __translatorMustCastToProperFunctionPointerType getProcAddressGles1(const char* procName);
 static bool vulkanInteropSupported();
 }
@@ -230,7 +227,7 @@ static void initContext(GLEScontext* ctx, ShareGroupPtr grp, bool nativeTextureD
 }
 
 static GLEScontext* createGLESContext(int maj, int min,
-        GlobalNameSpace* globalNameSpace, android::base::Stream* stream) {
+        GlobalNameSpace* globalNameSpace, gfxstream::Stream* stream) {
     (void)stream;
     return new GLEScmContext(maj, min, globalNameSpace, stream);
 }

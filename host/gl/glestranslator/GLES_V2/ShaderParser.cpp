@@ -40,7 +40,7 @@ GenNameInfo ShaderParser::getGenNameInfo() const {
     }
 }
 
-ShaderParser::ShaderParser(android::base::Stream* stream) : ObjectData(stream) {
+ShaderParser::ShaderParser(gfxstream::Stream* stream) : ObjectData(stream) {
     m_originalSrc = stream->getString();
     m_src = stream->getString();
     m_parsedSrc = stream->getString();
@@ -58,7 +58,7 @@ ShaderParser::ShaderParser(android::base::Stream* stream) : ObjectData(stream) {
     m_coreProfile = stream->getByte();
 }
 
-void ShaderParser::onSave(android::base::Stream* stream, unsigned int globalName) const {
+void ShaderParser::onSave(gfxstream::Stream* stream, unsigned int globalName) const {
     // The first byte is used to distinguish between program and shader object.
     // It will be loaded outside of this class
     stream->putByte(LOAD_SHADER);
@@ -195,16 +195,16 @@ void ShaderParser::setCompileStatus(bool val) {
 }
 
 void ShaderParser::attachProgram(GLuint program) {
-    android::base::AutoLock lock(m_programsLock);
+    gfxstream::base::AutoLock lock(m_programsLock);
     m_programs.insert(program);
 }
 
 void ShaderParser::detachProgram(GLuint program) {
-    android::base::AutoLock lock(m_programsLock);
+    gfxstream::base::AutoLock lock(m_programsLock);
     m_programs.erase(program);
 }
 
 bool ShaderParser::hasAttachedPrograms() const {
-    android::base::AutoLock lock(m_programsLock);
+    gfxstream::base::AutoLock lock(m_programsLock);
     return m_programs.size() > 0;
 }

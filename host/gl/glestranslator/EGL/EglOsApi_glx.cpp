@@ -13,27 +13,28 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-#include "EglOsApi.h"
 
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/SharedLibrary.h"
-#include "host-common/logging.h"
+// clang-format off
+#include "EglOsApi.h"
+// clang-format on
+
+#include <EGL/eglext.h>
+#include <GL/glx.h>
+#include <X11/Xlib.h>
+#include <string.h>
+
+#include <algorithm>
+#include <stdlib.h>
+#include <unordered_map>
+#include <vector>
 
 #include "CoreProfileConfigs.h"
 #include "GLcommon/GLLibrary.h"
 #include "X11ErrorHandler.h"
-
-#include "X11Support.h"
-
-#include <string.h>
-#include <X11/Xlib.h>
-#include <GL/glx.h>
-
-#include <EGL/eglext.h>
-
-#include <algorithm>
-#include <unordered_map>
-#include <vector>
+#include "gfxstream/host/X11Support.h"
+#include "gfxstream/SharedLibrary.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/common/logging.h"
 
 #define DEBUG_PBUF_POOL 0
 
@@ -61,10 +62,9 @@ public:
     GlxLibrary() {
         static const char kLibName[] = "libGL.so.1";
         char error[256];
-        mLib = android::base::SharedLibrary::open(kLibName, error, sizeof(error));
+        mLib = gfxstream::base::SharedLibrary::open(kLibName, error, sizeof(error));
         if (!mLib) {
-            ERR("%s: Could not open GL library %s [%s]\n",
-                __func__, kLibName, error);
+            GFXSTREAM_ERROR("%s: Could not open GL library %s [%s]\n", __func__, kLibName, error);
             return;
         }
         // NOTE: Don't use glXGetProcAddress here, only glXGetProcAddressARB
@@ -73,8 +73,8 @@ public:
         mResolver = reinterpret_cast<ResolverFunc*>(
                 mLib->findSymbol(kResolverName));
         if (!mResolver) {
-            ERR("%s: Could not find resolver %s in %s\n",
-                __func__, kResolverName, kLibName);
+            GFXSTREAM_ERROR("%s: Could not find resolver %s in %s\n", __func__, kResolverName,
+                            kLibName);
             mLib = NULL;
         }
     }
@@ -95,7 +95,7 @@ public:
     }
 
 private:
-    android::base::SharedLibrary* mLib = nullptr;
+    gfxstream::base::SharedLibrary* mLib = nullptr;
     ResolverFunc* mResolver = nullptr;
 };
 
@@ -154,10 +154,8 @@ void pixelFormatToConfig(EGLNativeDisplayType dpy,
                          GLXFBConfig frmt,
                          EglOS::AddConfigCallback* addConfigFunc,
                          void* addConfigOpaque) {
-    EglOS::ConfigInfo info;
+    EglOS::ConfigInfo info = {};
     int  tmp;
-
-    memset(&info, 0, sizeof(info));
 
     auto glx = getGlxApi();
 
@@ -368,7 +366,7 @@ public:
                 queryCoreProfileSupport();
             }
         } else {
-            ERR("%s: Could not query GLX version!\n", __func__);
+            GFXSTREAM_ERROR("%s: Could not query GLX version!\n", __func__);
         }
     }
 
@@ -482,7 +480,7 @@ public:
             const EglOS::PixelFormat* pixelFormat,
             const EglOS::PbufferInfo* info) {
 
-        android::base::AutoLock lock(mPbufLock);
+        gfxstream::base::AutoLock lock(mPbufLock);
 
         GLXFBConfig config = GlxPixelFormat::from(pixelFormat);
 
@@ -522,7 +520,7 @@ public:
 
     virtual bool releasePbuffer(EglOS::Surface* pb) {
 
-        android::base::AutoLock lock(mPbufLock);
+        gfxstream::base::AutoLock lock(mPbufLock);
 
         PROFILE_SLOW("releasePbuffer");
         if (!pb) {
@@ -560,7 +558,7 @@ public:
                     GlxSurface::drawableFor(read),
                     GlxContext::contextFor(context));
             if (mSwapInterval && draw->type() == GlxSurface::SurfaceType::WINDOW) {
-                android::base::AutoLock lock(mPbufLock);
+                gfxstream::base::AutoLock lock(mPbufLock);
                 auto it = mDisabledVsyncWindows.find(draw);
                 bool notPresent = it == mDisabledVsyncWindows.end();
                 if (notPresent || !it->second) {
@@ -663,7 +661,7 @@ private:
     std::unordered_map<GLXFBConfig, std::vector<EglOS::Surface* > > mFreePbufs;
     std::unordered_map<GLXFBConfig, std::vector<EglOS::Surface* > > mLivePbufs;
     int mPbufPrimingCount = 8;
-    android::base::Lock mPbufLock;
+    gfxstream::base::Lock mPbufLock;
     std::unordered_map<EglOS::Surface*, bool> mDisabledVsyncWindows;
 };
 
@@ -695,14 +693,9 @@ public:
     }
 };
 
-static GlxEngine* sHostEngine() {
-    static GlxEngine* e = new GlxEngine;
-    return e;
-}
-
 }  // namespace
 
 // static
-EglOS::Engine* EglOS::Engine::getHostInstance() {
-    return sHostEngine();
+EglOS::Engine* EglOS::Engine::createHostInstance() {
+    return new GlxEngine;
 }

@@ -12,173 +12,311 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cstdarg>
-#include <cstdint>
-
-#include "FrameBuffer.h"
-#include "GfxStreamAgents.h"
-#include "VirtioGpuFrontend.h"
-#include "aemu/base/Metrics.h"
-#include "aemu/base/system/System.h"
-#include "gfxstream/Strings.h"
-#include "gfxstream/host/Features.h"
-#include "gfxstream/host/Tracing.h"
-#include "host-common/FeatureControl.h"
-#include "host-common/GraphicsAgentFactory.h"
-#include "host-common/android_pipe_common.h"
-#include "host-common/android_pipe_device.h"
-#include "host-common/globals.h"
-#include "host-common/opengles-pipe.h"
-#include "host-common/opengles.h"
-#include "host-common/refcount-pipe.h"
-#include "host-common/vm_operations.h"
-#include "vulkan/VulkanDispatch.h"
-#include "render-utils/RenderLib.h"
-#include "vk_util.h"
-
 extern "C" {
 #include "gfxstream/virtio-gpu-gfxstream-renderer-unstable.h"
 #include "gfxstream/virtio-gpu-gfxstream-renderer.h"
-#include "host-common/goldfish_pipe.h"
 }  // extern "C"
 
-#define MAX_DEBUG_BUFFER_SIZE 512
-#define ELLIPSIS "...\0"
-#define ELLIPSIS_LEN 4
+#include <cstdint>
+#include <optional>
+#include <string_view>
 
-// Define the typedef for emulogger
-typedef void (*emulogger)(char severity, const char* file, unsigned int line,
-                          int64_t timestamp_us, const char* message);
+#include "FrameBuffer.h"
+#include "VirtioGpuFrontend.h"
+#include "gfxstream/Metrics.h"
+#include "gfxstream/Strings.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/host/Features.h"
+#include "gfxstream/host/Tracing.h"
+#include "gfxstream/host/address_space_graphics.h"
+#include "gfxstream/memory/UdmabufCreator.h"
+#include "gfxstream/system/System.h"
+#ifdef CONFIG_AEMU
+#include "host-common/opengles.h"
+#endif
+#include "render-utils/Renderer.h"
+#include "render-utils/RenderLib.h"
+#include "VkUtils.h"
+#include "vulkan/VulkanDispatch.h"
 
-// Template to enable the method call if gfxstream_logger_t equals emulogger
-template<typename T>
-typename std::enable_if<std::is_same<T, emulogger>::value, bool>::type
-call_logger_if_valid(T logger, char severity, const char* file, unsigned int line, int64_t timestamp_us, const char* message) {
-    // Call the logger and return true if the type matches
-    if (!logger) { return false; }
-    logger(severity, file, line, timestamp_us, message);
-    return true;
-}
+using namespace std::literals;
 
-// Template for invalid logger types (returns false if types don't match)
-template<typename T>
-typename std::enable_if<!std::is_same<T, emulogger>::value, bool>::type
-call_logger_if_valid(T, char, const char*, unsigned int, int64_t, const char*) {
-    // Return false if the type doesn't match
-    return false;
-}
-
-void* globalUserData = nullptr;
-stream_renderer_debug_callback globalDebugCallback = nullptr;
-
-static void append_truncation_marker(char* buf, int remaining_size) {
-    // Safely append truncation marker "..." if buffer has enough space
-    if (remaining_size >= ELLIPSIS_LEN) {
-        strncpy(buf + remaining_size - ELLIPSIS_LEN, ELLIPSIS, ELLIPSIS_LEN);
-    } else if (remaining_size >= 1) {
-        buf[remaining_size - 1] = '\0';
-    } else {
-        // Oh oh.. In theory this shouldn't happen.
-        assert(false);
-    }
-}
-
-static void log_with_prefix(char*& buf, int& remaining_size, const char* file, int line,
-                            const char* pretty_function) {
-    // Add logging prefix if necessary
-    int formatted_len = snprintf(buf, remaining_size, "[%s(%d)] %s ", file, line, pretty_function);
-
-    // Handle potential truncation
-    if (formatted_len >= remaining_size) {
-        append_truncation_marker(buf, remaining_size);
-        remaining_size = 0;
-    } else {
-        buf += formatted_len;             // Adjust buf
-        remaining_size -= formatted_len;  // Reduce remaining buffer size
-    }
-}
-
-static char translate_severity(uint32_t type) {
-    switch (type) {
-        case STREAM_RENDERER_DEBUG_ERROR:
-            return 'E';
-        case STREAM_RENDERER_DEBUG_WARN:
-            return 'W';
-        case STREAM_RENDERER_DEBUG_INFO:
-            return 'I';
-        case STREAM_RENDERER_DEBUG_DEBUG:
-            return 'D';
-        default:
-            return 'D';
-    }
-}
-
-using android::AndroidPipe;
-using android::base::MetricsLogger;
+using gfxstream::MetricsLogger;
+using gfxstream::host::LogLevel;
 using gfxstream::host::VirtioGpuFrontend;
+using gfxstream::RendererPtr;
+
+namespace {
 
 static VirtioGpuFrontend* sFrontend() {
     static VirtioGpuFrontend* p = new VirtioGpuFrontend;
     return p;
 }
 
-extern "C" {
-
-void stream_renderer_log(uint32_t type, const char* file, int line, const char* pretty_function,
-                         const char* format, ...) {
-
-    char printbuf[MAX_DEBUG_BUFFER_SIZE];
-    char* buf = printbuf;
-    int remaining_size = MAX_DEBUG_BUFFER_SIZE;
-    static_assert(MAX_DEBUG_BUFFER_SIZE > 4);
-
-    // Add the logging prefix if needed
-#ifdef CONFIG_AEMU
-    static gfxstream_logger_t gfx_logger = get_gfx_stream_logger();
-    if (!gfx_logger) {
-        log_with_prefix(buf, remaining_size, file, line, pretty_function);
+std::optional<gfxstream::host::FeatureSet>
+ParseGfxstreamFeatures(const int rendererFlags,
+                        const std::string& rendererFeatures) {
+    if (gfxstream::base::getEnvironmentVariable("ANDROID_GFXSTREAM_EGL") == "1") {
+        gfxstream::base::setEnvironmentVariable("ANDROID_EGL_ON_EGL", "1");
+        gfxstream::base::setEnvironmentVariable("ANDROID_EMUGL_VERBOSE", "1");
     }
-#else
-    log_with_prefix(buf, remaining_size, file, line, pretty_function);
-#endif
+    gfxstream::base::setEnvironmentVariable("ANDROID_EMU_HEADLESS", "1");
 
-    // Format the message with variable arguments
-    va_list args;
-    va_start(args, format);
-    int formatted_len = vsnprintf(buf, remaining_size, format, args);
-    va_end(args);
+    gfxstream::host::FeatureSet features;
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, EglOnEgl,
+        rendererFlags & STREAM_RENDERER_FLAGS_USE_EGL_BIT ||
+        gfxstream::base::getEnvironmentVariable("ANDROID_EGL_ON_EGL") == "1");
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(&features, VulkanExternalSync,
+                                       rendererFlags & STREAM_RENDERER_FLAGS_VULKAN_EXTERNAL_SYNC);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, GlAsyncSwap, false);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, GlDirectMem, false);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, GlDma, false);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, GlesDynamicVersion, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, GlPipeChecksum, false);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, GuestVulkanOnly,
+        (rendererFlags & STREAM_RENDERER_FLAGS_USE_VK_BIT) &&
+        !(rendererFlags & STREAM_RENDERER_FLAGS_USE_GLES_BIT));
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, HostComposition, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, NativeTextureDecompression, false);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, NoDelayCloseColorBuffer, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, PlayStoreImage,
+        !(rendererFlags & STREAM_RENDERER_FLAGS_USE_GLES_BIT));
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, RefCountPipe,
+        /*Resources are ref counted via guest file objects.*/ false);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, SystemBlob,
+        rendererFlags & STREAM_RENDERER_FLAGS_USE_SYSTEM_BLOB);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VirtioGpuFenceContexts, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VirtioGpuNativeSync, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VirtioGpuNext, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, Vulkan,
+        rendererFlags & STREAM_RENDERER_FLAGS_USE_VK_BIT);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VulkanBatchedDescriptorSetUpdate, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VulkanIgnoredHandles, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VulkanNativeSwapchain,
+        rendererFlags & STREAM_RENDERER_FLAGS_VULKAN_NATIVE_SWAPCHAIN_BIT);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VulkanNullOptionalStrings, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VulkanQueueSubmitWithCommands, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VulkanShaderFloat16Int8, true);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VulkanSnapshots,
+        gfxstream::base::getEnvironmentVariable("ANDROID_GFXSTREAM_CAPTURE_VK_SNAPSHOT") == "1");
+    // b:423003060
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+        &features, VulkanAllocateHostVisibleAsUdmabuf,
+        gfxstream::base::IsAndroidKernel6_6() && gfxstream::base::HasUdmabufDevice());
+    // udmabuf requires ExternalBlob feature.
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(&features, ExternalBlob,
+                                       rendererFlags & STREAM_RENDERER_FLAGS_USE_EXTERNAL_BLOB ||
+                                           features.VulkanAllocateHostVisibleAsUdmabuf.enabled);
+    GFXSTREAM_SET_FEATURE_ON_CONDITION(&features, VulkanEnsureCachedCoherentMemoryAvailable, true);
 
-    // Handle potential truncation
-    if (formatted_len >= remaining_size) {
-        append_truncation_marker(buf, remaining_size);
-    }
+    for (const std::string& rendererFeature : gfxstream::Split(rendererFeatures, ",")) {
+        if (rendererFeature.empty()) continue;
 
-#ifdef CONFIG_AEMU
-    // Forward to emulator?
-    if (call_logger_if_valid(gfx_logger, translate_severity(type), file, line, 0, printbuf)) {
-        return;
-    }
-#endif
-
-    // To a gfxstream debugger?
-    if (globalUserData && globalDebugCallback) {
-        struct stream_renderer_debug debug = {0};
-        debug.debug_type = type;
-        debug.message = &printbuf[0];
-        globalDebugCallback(globalUserData, &debug);
-    } else {
-        // Cannot use logging routines, fallback to stderr
-        const char* logLevel = "error";
-        if (type == STREAM_RENDERER_DEBUG_WARN) {
-            logLevel = "warning";
-        } else if (type == STREAM_RENDERER_DEBUG_INFO) {
-            logLevel = "info";
-        } else if (type == STREAM_RENDERER_DEBUG_DEBUG) {
-            logLevel = "debug";
+        const std::vector<std::string>& parts = gfxstream::Split(rendererFeature, ":");
+        if (parts.size() != 2) {
+            GFXSTREAM_ERROR("Error: invalid renderer features: %s", rendererFeature.c_str());
+            return std::nullopt;
         }
-        fprintf(stderr, "stream_renderer_log [%s]: %s\n", logLevel, printbuf);
+
+        const std::string& feature_name = parts[0];
+
+        auto feature_it = features.map.find(feature_name);
+        if (feature_it == features.map.end()) {
+            GFXSTREAM_ERROR("Error: invalid renderer feature: '%s'", feature_name.c_str());
+            return std::nullopt;
+        }
+
+        const std::string& feature_status = parts[1];
+        if (feature_status != "enabled" && feature_status != "disabled") {
+            GFXSTREAM_ERROR("Error: invalid option %s for renderer feature: %s",
+                            feature_status.c_str(), feature_name.c_str());
+            return std::nullopt;
+        }
+
+        auto& feature_info = feature_it->second;
+        feature_info->enabled = feature_status == "enabled";
+        feature_info->reason = "Overridden via STREAM_RENDERER_PARAM_RENDERER_FEATURES";
+
+        GFXSTREAM_INFO("Gfxstream feature %s %s", feature_name.c_str(), feature_status.c_str());
+    }
+
+    if (features.SystemBlob.enabled) {
+        if (!features.ExternalBlob.enabled) {
+            GFXSTREAM_ERROR("The SystemBlob features requires the ExternalBlob feature.");
+            return std::nullopt;
+        }
+#ifndef _WIN32
+        GFXSTREAM_WARNING("Warning: USE_SYSTEM_BLOB has only been tested on Windows");
+#endif
+    }
+    if (features.VulkanNativeSwapchain.enabled && !features.Vulkan.enabled) {
+        GFXSTREAM_ERROR("can't enable vulkan native swapchain, Vulkan is disabled");
+        return std::nullopt;
+    }
+
+    return features;
+}
+
+std::optional<gfxstream::host::FeatureSet>
+GetGfxstreamFeatures(const int rendererFlags,
+                     const std::string& rendererFeaturesString,
+                     const bool rendererInitializedExternally) {
+    if (rendererInitializedExternally) {
+#ifdef CONFIG_AEMU
+        return gfxstream::FrameBuffer::getFB()->getFeatures();
+#else
+        GFXSTREAM_FATAL("Unexpected external renderer initialization.");
+        return std::nullopt;
+#endif
+    }
+    return ParseGfxstreamFeatures(rendererFlags, rendererFeaturesString);
+}
+
+SelectedRenderer parse_renderer(std::string_view renderer) {
+    if (renderer == "host"sv || renderer == "on"sv) {
+        return SELECTED_RENDERER_HOST;
+    } else if (renderer == "off"sv) {
+        return SELECTED_RENDERER_OFF;
+    } else if (renderer == "guest"sv) {
+        return SELECTED_RENDERER_GUEST;
+    } else if (renderer == "mesa"sv) {
+        return SELECTED_RENDERER_MESA;
+    } else if (renderer == "swiftshader"sv) {
+        return SELECTED_RENDERER_SWIFTSHADER;
+    } else if (renderer == "angle"sv || renderer == "swangle"sv) {
+        return SELECTED_RENDERER_ANGLE;
+    } else if (renderer == "angle9"sv) {
+        return SELECTED_RENDERER_ANGLE9;
+    } else if (renderer == "swiftshader_indirect"sv) {
+        return SELECTED_RENDERER_SWIFTSHADER_INDIRECT;
+    } else if (renderer == "angle_indirect"sv || renderer == "swangle_indirect"sv) {
+        return SELECTED_RENDERER_ANGLE_INDIRECT;
+    } else if (renderer == "angle9_indirect"sv) {
+        return SELECTED_RENDERER_ANGLE9_INDIRECT;
+    } else {
+        return SELECTED_RENDERER_UNKNOWN;
     }
 }
+
+// TODO(b/418238945): Remove this AEMU specific code if possible.
+void MaybeConfigureRenderer(gfxstream::RenderLib& rendererLibrary) {
+    if (const std::string& s_renderer = gfxstream::base::getEnvironmentVariable("ANDROID_EMU_RENDERER"); !s_renderer.empty()) {
+        SelectedRenderer renderer = parse_renderer(s_renderer);
+        if (renderer == SELECTED_RENDERER_UNKNOWN) {
+            GFXSTREAM_FATAL("Unknown renderer specified in ANDROID_EMU_RENDERER envvar: ", s_renderer.c_str());
+        }
+        rendererLibrary.setRenderer(renderer);
+    } else {
+        // TODO: decouple from init and auto detect needed features in EmulationGl.
+        rendererLibrary.setRenderer(SELECTED_RENDERER_SWIFTSHADER_INDIRECT);
+    }
+}
+
+RendererPtr InitRenderer(uint32_t displayWidth,
+                         uint32_t displayHeight,
+                         int rendererFlags,
+                         const gfxstream::host::FeatureSet& features) {
+    GFXSTREAM_DEBUG("Initializing renderer with width:%u height:%u renderer-flags:0x%x",
+                    displayWidth, displayHeight, rendererFlags);
+
+    gfxstream::vk::vkDispatch(false /* don't use test ICD */);
+
+    static gfxstream::RenderLibPtr sRendererLibrary = gfxstream::initLibrary();
+    MaybeConfigureRenderer(*sRendererLibrary);
+
+    RendererPtr renderer = sRendererLibrary->initRenderer(displayWidth, displayHeight, features, true);
+    if (!renderer) {
+        GFXSTREAM_ERROR("Failed to initialize renderer.");
+        return nullptr;
+    }
+
+    // TODO: move this into a proper function in address_space_device_control_ops.
+    gfxstream::host::AddressSpaceGraphicsContext::setConsumer(
+        gfxstream::ConsumerInterface{
+            .create = [renderer](const gfxstream::AsgConsumerCreateInfo& info, gfxstream::Stream* loadStream) {
+                return renderer->addressSpaceGraphicsConsumerCreate(info, loadStream);
+            },
+            .destroy = [renderer](void* consumer) {
+                renderer->addressSpaceGraphicsConsumerDestroy(consumer);
+            },
+            .preSave = [renderer](void* consumer) {
+                renderer->addressSpaceGraphicsConsumerPreSave(consumer);
+            },
+            .globalPreSave = [renderer]() {
+                renderer->pauseAllPreSave();
+            },
+            .save = [renderer](void* consumer, gfxstream::Stream* stream) {
+                renderer->addressSpaceGraphicsConsumerSave(consumer, stream);
+            },
+            .globalPostSave = [renderer]() {
+                renderer->resumeAll();
+            },
+            .postSave = [renderer](void* consumer) {
+                renderer->addressSpaceGraphicsConsumerPostSave(consumer);
+            },
+            .postLoad = [renderer](void* consumer) {
+                renderer->addressSpaceGraphicsConsumerRegisterPostLoadRenderThread(consumer);
+            },
+            .globalPreLoad = [renderer]() {
+            },
+            .reloadRingConfig = [renderer](void* consumer) {
+                renderer->addressSpaceGraphicsConsumerReloadRingConfig(consumer);
+            },
+        });
+
+    return renderer;
+}
+
+RendererPtr GetRenderer(uint32_t displayWidth,
+                        uint32_t displayHeight,
+                        int rendererFlags,
+                        const gfxstream::host::FeatureSet& features,
+                        const bool rendererInitializedExternally) {
+    RendererPtr renderer;
+
+    if (rendererInitializedExternally) {
+#ifdef CONFIG_AEMU
+        renderer = android_getOpenglesRenderer();
+#else
+        GFXSTREAM_FATAL("Unexpected external renderer initialization.");
+        return nullptr;
+#endif
+    } else {
+        renderer = InitRenderer(displayWidth, displayHeight, rendererFlags, features);
+    }
+
+    gfxstream::FrameBuffer::waitUntilInitialized();
+
+    return renderer;
+}
+
+}  // namespace
+
+extern "C" {
 
 VG_EXPORT int stream_renderer_resource_create(struct stream_renderer_resource_create_args* args,
                                               struct iovec* iov, uint32_t num_iovs) {
@@ -413,7 +551,7 @@ VG_EXPORT int stream_renderer_snapshot(const char* dir) {
 #ifdef GFXSTREAM_BUILD_WITH_SNAPSHOT_FRONTEND_SUPPORT
     return sFrontend()->snapshot(dir);
 #else
-    stream_renderer_error("Snapshot save requested without support.");
+    GFXSTREAM_ERROR("Snapshot save requested without support.");
     return -EINVAL;
 #endif
 }
@@ -424,7 +562,7 @@ VG_EXPORT int stream_renderer_restore(const char* dir) {
 #ifdef GFXSTREAM_BUILD_WITH_SNAPSHOT_FRONTEND_SUPPORT
     return sFrontend()->restore(dir);
 #else
-    stream_renderer_error("Snapshot save requested without support.");
+    GFXSTREAM_ERROR("Snapshot save requested without support.");
     return -EINVAL;
 #endif
 }
@@ -436,321 +574,6 @@ VG_EXPORT int stream_renderer_resume() {
 
     return 0;
 }
-
-static const GoldfishPipeServiceOps goldfish_pipe_service_ops = {
-    // guest_open()
-    [](GoldfishHwPipe* hwPipe) -> GoldfishHostPipe* {
-        return static_cast<GoldfishHostPipe*>(android_pipe_guest_open(hwPipe));
-    },
-    // guest_open_with_flags()
-    [](GoldfishHwPipe* hwPipe, uint32_t flags) -> GoldfishHostPipe* {
-        return static_cast<GoldfishHostPipe*>(android_pipe_guest_open_with_flags(hwPipe, flags));
-    },
-    // guest_close()
-    [](GoldfishHostPipe* hostPipe, GoldfishPipeCloseReason reason) {
-        static_assert((int)GOLDFISH_PIPE_CLOSE_GRACEFUL == (int)PIPE_CLOSE_GRACEFUL,
-                      "Invalid PIPE_CLOSE_GRACEFUL value");
-        static_assert((int)GOLDFISH_PIPE_CLOSE_REBOOT == (int)PIPE_CLOSE_REBOOT,
-                      "Invalid PIPE_CLOSE_REBOOT value");
-        static_assert((int)GOLDFISH_PIPE_CLOSE_LOAD_SNAPSHOT == (int)PIPE_CLOSE_LOAD_SNAPSHOT,
-                      "Invalid PIPE_CLOSE_LOAD_SNAPSHOT value");
-        static_assert((int)GOLDFISH_PIPE_CLOSE_ERROR == (int)PIPE_CLOSE_ERROR,
-                      "Invalid PIPE_CLOSE_ERROR value");
-
-        android_pipe_guest_close(hostPipe, static_cast<PipeCloseReason>(reason));
-    },
-    // guest_pre_load()
-    [](QEMUFile* file) { (void)file; },
-    // guest_post_load()
-    [](QEMUFile* file) { (void)file; },
-    // guest_pre_save()
-    [](QEMUFile* file) { (void)file; },
-    // guest_post_save()
-    [](QEMUFile* file) { (void)file; },
-    // guest_load()
-    [](QEMUFile* file, GoldfishHwPipe* hwPipe, char* force_close) -> GoldfishHostPipe* {
-        (void)file;
-        (void)hwPipe;
-        (void)force_close;
-        return nullptr;
-    },
-    // guest_save()
-    [](GoldfishHostPipe* hostPipe, QEMUFile* file) {
-        (void)hostPipe;
-        (void)file;
-    },
-    // guest_poll()
-    [](GoldfishHostPipe* hostPipe) {
-        static_assert((int)GOLDFISH_PIPE_POLL_IN == (int)PIPE_POLL_IN, "invalid POLL_IN values");
-        static_assert((int)GOLDFISH_PIPE_POLL_OUT == (int)PIPE_POLL_OUT, "invalid POLL_OUT values");
-        static_assert((int)GOLDFISH_PIPE_POLL_HUP == (int)PIPE_POLL_HUP, "invalid POLL_HUP values");
-
-        return static_cast<GoldfishPipePollFlags>(android_pipe_guest_poll(hostPipe));
-    },
-    // guest_recv()
-    [](GoldfishHostPipe* hostPipe, GoldfishPipeBuffer* buffers, int numBuffers) -> int {
-        // NOTE: Assumes that AndroidPipeBuffer and GoldfishPipeBuffer
-        //       have exactly the same layout.
-        static_assert(sizeof(AndroidPipeBuffer) == sizeof(GoldfishPipeBuffer),
-                      "Invalid PipeBuffer sizes");
-    // We can't use a static_assert with offsetof() because in msvc, it uses
-    // reinterpret_cast.
-    // TODO: Add runtime assertion instead?
-    // https://developercommunity.visualstudio.com/content/problem/22196/static-assert-cannot-compile-constexprs-method-tha.html
-#ifndef _MSC_VER
-        static_assert(offsetof(AndroidPipeBuffer, data) == offsetof(GoldfishPipeBuffer, data),
-                      "Invalid PipeBuffer::data offsets");
-        static_assert(offsetof(AndroidPipeBuffer, size) == offsetof(GoldfishPipeBuffer, size),
-                      "Invalid PipeBuffer::size offsets");
-#endif
-        return android_pipe_guest_recv(hostPipe, reinterpret_cast<AndroidPipeBuffer*>(buffers),
-                                       numBuffers);
-    },
-    // wait_guest_recv()
-    [](GoldfishHostPipe* hostPipe) { android_pipe_wait_guest_recv(hostPipe); },
-    // guest_send()
-    [](GoldfishHostPipe** hostPipe, const GoldfishPipeBuffer* buffers, int numBuffers) -> int {
-        return android_pipe_guest_send(reinterpret_cast<void**>(hostPipe),
-                                       reinterpret_cast<const AndroidPipeBuffer*>(buffers),
-                                       numBuffers);
-    },
-    // wait_guest_send()
-    [](GoldfishHostPipe* hostPipe) { android_pipe_wait_guest_send(hostPipe); },
-    // guest_wake_on()
-    [](GoldfishHostPipe* hostPipe, GoldfishPipeWakeFlags wakeFlags) {
-        android_pipe_guest_wake_on(hostPipe, static_cast<int>(wakeFlags));
-    },
-    // dma_add_buffer()
-    [](void* pipe, uint64_t paddr, uint64_t sz) {
-        // not considered for virtio
-    },
-    // dma_remove_buffer()
-    [](uint64_t paddr) {
-        // not considered for virtio
-    },
-    // dma_invalidate_host_mappings()
-    []() {
-        // not considered for virtio
-    },
-    // dma_reset_host_mappings()
-    []() {
-        // not considered for virtio
-    },
-    // dma_save_mappings()
-    [](QEMUFile* file) { (void)file; },
-    // dma_load_mappings()
-    [](QEMUFile* file) { (void)file; },
-};
-
-static int stream_renderer_opengles_init(uint32_t display_width, uint32_t display_height,
-                                         int renderer_flags, gfxstream::host::FeatureSet features) {
-    stream_renderer_debug("start. display dimensions: width %u height %u, renderer flags: 0x%x",
-                          display_width, display_height, renderer_flags);
-
-    // Flags processing
-
-    // TODO: hook up "gfxstream egl" to the renderer flags
-    // STREAM_RENDERER_FLAGS_USE_EGL_BIT in crosvm
-    // as it's specified from launch_cvd.
-    // At the moment, use ANDROID_GFXSTREAM_EGL=1
-    // For test on GCE
-    if (android::base::getEnvironmentVariable("ANDROID_GFXSTREAM_EGL") == "1") {
-        android::base::setEnvironmentVariable("ANDROID_EGL_ON_EGL", "1");
-        android::base::setEnvironmentVariable("ANDROID_EMUGL_LOG_PRINT", "1");
-        android::base::setEnvironmentVariable("ANDROID_EMUGL_VERBOSE", "1");
-    }
-    // end for test on GCE
-
-    android::base::setEnvironmentVariable("ANDROID_EMU_HEADLESS", "1");
-
-    bool egl2eglByEnv = android::base::getEnvironmentVariable("ANDROID_EGL_ON_EGL") == "1";
-    bool egl2eglByFlag = renderer_flags & STREAM_RENDERER_FLAGS_USE_EGL_BIT;
-    bool enable_egl2egl = egl2eglByFlag || egl2eglByEnv;
-    if (enable_egl2egl) {
-        android::base::setEnvironmentVariable("ANDROID_GFXSTREAM_EGL", "1");
-        android::base::setEnvironmentVariable("ANDROID_EGL_ON_EGL", "1");
-    }
-
-    bool surfaceless = renderer_flags & STREAM_RENDERER_FLAGS_USE_SURFACELESS_BIT;
-
-    android::featurecontrol::productFeatureOverride();
-
-    auto androidHw = aemu_get_android_hw();
-
-    androidHw->hw_gltransport_asg_writeBufferSize = 1048576;
-    androidHw->hw_gltransport_asg_writeStepSize = 262144;
-    androidHw->hw_gltransport_asg_dataRingSize = 524288;
-    androidHw->hw_gltransport_drawFlushInterval = 10000;
-
-    EmuglConfig config;
-    // Make all the console agents available.
-#ifndef GFXSTREAM_MESON_BUILD
-    android::emulation::injectGraphicsAgents(android::emulation::GfxStreamGraphicsAgentFactory());
-#endif
-
-    emuglConfig_init(&config, true /* gpu enabled */, "auto",
-                     enable_egl2egl ? "swiftshader_indirect" : "host", 64, /* bitness */
-                     surfaceless,                                          /* no window */
-                     false,                                                /* blocklisted */
-                     false,                                                /* has guest renderer */
-                     WINSYS_GLESBACKEND_PREFERENCE_AUTO, true /* force host gpu vulkan */);
-
-    emuglConfig_setupEnv(&config);
-
-    gfxstream::vk::vkDispatch(false /* don't use test ICD */);
-
-    android_prepareOpenglesEmulation();
-
-    {
-        static gfxstream::RenderLibPtr renderLibPtr = gfxstream::initLibrary();
-        android_setOpenglesEmulation(renderLibPtr.get(), nullptr, nullptr);
-    }
-
-    int maj;
-    int min;
-    android_startOpenglesRenderer(display_width, display_height, 1, 28, getGraphicsAgents()->vm,
-                                  getGraphicsAgents()->emu, getGraphicsAgents()->multi_display,
-                                  &features, &maj, &min);
-
-    char* vendor = nullptr;
-    char* renderer = nullptr;
-    char* version = nullptr;
-
-    android_getOpenglesHardwareStrings(&vendor, &renderer, &version);
-
-    stream_renderer_info("GL strings; [%s] [%s] [%s].", vendor, renderer, version);
-
-    auto openglesRenderer = android_getOpenglesRenderer();
-
-    if (!openglesRenderer) {
-        stream_renderer_error("No renderer started, fatal");
-        return -EINVAL;
-    }
-
-    address_space_set_vm_operations(getGraphicsAgents()->vm);
-    android_init_opengles_pipe();
-    android_opengles_pipe_set_recv_mode(2 /* virtio-gpu */);
-    android_init_refcount_pipe();
-
-    return 0;
-}
-
-namespace {
-
-int parseGfxstreamFeatures(const int renderer_flags,
-                           const std::string& renderer_features,
-                           gfxstream::host::FeatureSet& features) {
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, ExternalBlob,
-        renderer_flags & STREAM_RENDERER_FLAGS_USE_EXTERNAL_BLOB);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(&features, VulkanExternalSync,
-                                       renderer_flags & STREAM_RENDERER_FLAGS_VULKAN_EXTERNAL_SYNC);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, GlAsyncSwap, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, GlDirectMem, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, GlDma, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, GlesDynamicVersion, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, GlPipeChecksum, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, GuestVulkanOnly,
-        (renderer_flags & STREAM_RENDERER_FLAGS_USE_VK_BIT) &&
-        !(renderer_flags & STREAM_RENDERER_FLAGS_USE_GLES_BIT));
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, HostComposition, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, NativeTextureDecompression, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, NoDelayCloseColorBuffer, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, PlayStoreImage,
-        !(renderer_flags & STREAM_RENDERER_FLAGS_USE_GLES_BIT));
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, RefCountPipe,
-        /*Resources are ref counted via guest file objects.*/ false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, SystemBlob,
-        renderer_flags & STREAM_RENDERER_FLAGS_USE_SYSTEM_BLOB);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VirtioGpuFenceContexts, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VirtioGpuNativeSync, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VirtioGpuNext, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, Vulkan,
-        renderer_flags & STREAM_RENDERER_FLAGS_USE_VK_BIT);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VulkanBatchedDescriptorSetUpdate, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VulkanIgnoredHandles, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VulkanNativeSwapchain,
-        renderer_flags & STREAM_RENDERER_FLAGS_VULKAN_NATIVE_SWAPCHAIN_BIT);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VulkanNullOptionalStrings, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VulkanQueueSubmitWithCommands, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VulkanShaderFloat16Int8, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
-        &features, VulkanSnapshots,
-        android::base::getEnvironmentVariable("ANDROID_GFXSTREAM_CAPTURE_VK_SNAPSHOT") == "1");
-
-    for (const std::string& renderer_feature : gfxstream::Split(renderer_features, ",")) {
-        if (renderer_feature.empty()) continue;
-
-        const std::vector<std::string>& parts = gfxstream::Split(renderer_feature, ":");
-        if (parts.size() != 2) {
-            stream_renderer_error("Error: invalid renderer features: %s",
-                                  renderer_features.c_str());
-            return -EINVAL;
-        }
-
-        const std::string& feature_name = parts[0];
-
-        auto feature_it = features.map.find(feature_name);
-        if (feature_it == features.map.end()) {
-            stream_renderer_error("Error: invalid renderer feature: '%s'", feature_name.c_str());
-            return -EINVAL;
-        }
-
-        const std::string& feature_status = parts[1];
-        if (feature_status != "enabled" && feature_status != "disabled") {
-            stream_renderer_error("Error: invalid option %s for renderer feature: %s",
-                                  feature_status.c_str(), feature_name.c_str());
-            return -EINVAL;
-        }
-
-        auto& feature_info = feature_it->second;
-        feature_info->enabled = feature_status == "enabled";
-        feature_info->reason = "Overridden via STREAM_RENDERER_PARAM_RENDERER_FEATURES";
-
-        stream_renderer_info("Gfxstream feature %s %s", feature_name.c_str(),
-                              feature_status.c_str());
-    }
-
-    if (features.SystemBlob.enabled) {
-        if (!features.ExternalBlob.enabled) {
-            stream_renderer_error("The SystemBlob features requires the ExternalBlob feature.");
-            return -EINVAL;
-        }
-#ifndef _WIN32
-        stream_renderer_warn("Warning: USE_SYSTEM_BLOB has only been tested on Windows");
-#endif
-    }
-    if (features.VulkanNativeSwapchain.enabled && !features.Vulkan.enabled) {
-        stream_renderer_error("can't enable vulkan native swapchain, Vulkan is disabled");
-        return -EINVAL;
-    }
-
-    return 0;
-}
-
-}  // namespace
 
 VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer_params,
                                    uint64_t num_params) {
@@ -805,10 +628,11 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
     int renderer_flags = 0;
     std::string renderer_features_str;
     stream_renderer_fence_callback fence_callback = nullptr;
-    bool skip_opengles = false;
+    stream_renderer_debug_callback log_callback = nullptr;
+    bool rendererInitializedExternally = false;
 
     // Iterate all parameters that we support.
-    stream_renderer_debug("Reading stream renderer parameters:");
+    GFXSTREAM_DEBUG("Reading stream renderer parameters:");
     for (uint64_t i = 0; i < num_params; ++i) {
         stream_renderer_param& param = stream_renderer_params[i];
 
@@ -816,11 +640,11 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
         // adding new prints.
         if (printed_param_values.find(param.key) != printed_param_values.end() ||
             param.value <= 4096) {
-            stream_renderer_debug("%s - %llu", get_param_string(param.key).c_str(),
-                                  static_cast<unsigned long long>(param.value));
+            GFXSTREAM_DEBUG("%s - %llu", get_param_string(param.key).c_str(),
+                            static_cast<unsigned long long>(param.value));
         } else {
             // If not full value, print that it was passed.
-            stream_renderer_debug("%s", get_param_string(param.key).c_str());
+            GFXSTREAM_DEBUG("%s", get_param_string(param.key).c_str());
         }
 
         // Removing every param we process will leave required_params empty if all provided.
@@ -831,7 +655,6 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
                 break;
             case STREAM_RENDERER_PARAM_USER_DATA: {
                 renderer_cookie = reinterpret_cast<void*>(static_cast<uintptr_t>(param.value));
-                globalUserData = renderer_cookie;
                 break;
             }
             case STREAM_RENDERER_PARAM_RENDERER_FLAGS: {
@@ -852,12 +675,14 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
                 break;
             }
             case STREAM_RENDERER_PARAM_DEBUG_CALLBACK: {
-                globalDebugCallback = reinterpret_cast<stream_renderer_debug_callback>(
+                log_callback = reinterpret_cast<stream_renderer_debug_callback>(
                     static_cast<uintptr_t>(param.value));
                 break;
             }
             case STREAM_RENDERER_SKIP_OPENGLES_INIT: {
-                skip_opengles = static_cast<bool>(param.value);
+                // AEMU currently does its own initialization in
+                // qemu/android/android-emu/android/opengles.cpp.
+                rendererInitializedExternally = static_cast<bool>(param.value);
                 break;
             }
             case STREAM_RENDERER_PARAM_METRICS_CALLBACK_ADD_INSTANT_EVENT: {
@@ -896,29 +721,73 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
                 break;
             }
             case STREAM_RENDERER_PARAM_METRICS_CALLBACK_ABORT: {
-                emugl::setDieFunction(
-                    reinterpret_cast<stream_renderer_param_metrics_callback_abort>(
-                        static_cast<uintptr_t>(param.value)));
+                GFXSTREAM_FATAL(
+                    "Deprecated STREAM_RENDERER_PARAM_METRICS_CALLBACK_ABORT. "
+                    "Use STREAM_RENDERER_PARAM_DEBUG_CALLBACK instead which includes "
+                    "fatal logs.");
                 break;
             }
             default: {
                 // We skip any parameters we don't recognize.
-                stream_renderer_error(
+                GFXSTREAM_ERROR(
                     "Skipping unknown parameter key: %llu. May need to upgrade gfxstream.",
                     static_cast<unsigned long long>(param.key));
                 break;
             }
         }
     }
-    stream_renderer_debug("Finished reading parameters");
+
+    if (log_callback) {
+        gfxstream::host::SetGfxstreamLogCallback([log_callback, log_user_data = renderer_cookie](
+                                                     LogLevel level, const char* file, int line,
+                                                     const char* function, const char* message) {
+            const std::string formatted =
+                GetDefaultFormattedLog(level, file, line, function, message);
+
+            stream_renderer_debug log_info = {
+                .message = formatted.c_str(),
+            };
+
+            switch (level) {
+                case LogLevel::kFatal: {
+                    log_info.debug_type = STREAM_RENDERER_DEBUG_ERROR;
+                    break;
+                }
+                case LogLevel::kError: {
+                    log_info.debug_type = STREAM_RENDERER_DEBUG_ERROR;
+                    break;
+                }
+                case LogLevel::kWarning: {
+                    log_info.debug_type = STREAM_RENDERER_DEBUG_WARN;
+                    break;
+                }
+                case LogLevel::kInfo: {
+                    log_info.debug_type = STREAM_RENDERER_DEBUG_INFO;
+                    break;
+                }
+                case LogLevel::kDebug: {
+                    log_info.debug_type = STREAM_RENDERER_DEBUG_DEBUG;
+                    break;
+                }
+                case LogLevel::kVerbose: {
+                    log_info.debug_type = STREAM_RENDERER_DEBUG_DEBUG;
+                    break;
+                }
+            }
+
+            log_callback(log_user_data, &log_info);
+        });
+    }
+
+    GFXSTREAM_DEBUG("Finished reading parameters");
 
     // Some required params not found.
     if (required_params.size() > 0) {
-        stream_renderer_error("Missing required parameters:");
+        GFXSTREAM_ERROR("Missing required parameters:");
         for (uint64_t param : required_params) {
-            stream_renderer_error("%s", get_param_string(param).c_str());
+            GFXSTREAM_ERROR("%s", get_param_string(param).c_str());
         }
-        stream_renderer_error("Failing initialization intentionally");
+        GFXSTREAM_ERROR("Failing initialization intentionally");
         return -EINVAL;
     }
 
@@ -926,18 +795,20 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
     renderer_flags |= STREAM_RENDERER_FLAGS_VULKAN_EXTERNAL_SYNC;
 #endif
 
-    gfxstream::host::FeatureSet features;
-    int ret = parseGfxstreamFeatures(renderer_flags, renderer_features_str, features);
-    if (ret) {
-        stream_renderer_error("Failed to initialize: failed to parse Gfxstream features.");
-        return ret;
+    auto featuresOpt = GetGfxstreamFeatures(renderer_flags,
+                                            renderer_features_str,
+                                            rendererInitializedExternally);
+    if (!featuresOpt) {
+        GFXSTREAM_ERROR("Failed to initialize: failed to get Gfxstream features.");
+        return -EINVAL;
     }
+    gfxstream::host::FeatureSet features = std::move(*featuresOpt);
 
-    stream_renderer_info("Gfxstream features:");
+    GFXSTREAM_INFO("Gfxstream features:");
     for (const auto& [_, featureInfo] : features.map) {
-        stream_renderer_info("    %s: %s (%s)", featureInfo->name.c_str(),
-                             (featureInfo->enabled ? "enabled" : "disabled"),
-                             featureInfo->reason.c_str());
+        GFXSTREAM_INFO("    %s: %s (%s)", featureInfo->name.c_str(),
+                       (featureInfo->enabled ? "enabled" : "disabled"),
+                       featureInfo->reason.c_str());
     }
 
     gfxstream::host::InitializeTracing();
@@ -950,7 +821,8 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
                     []() {
                         auto fb = gfxstream::FrameBuffer::getFB();
                         if (!fb) {
-                            ERR("FrameBuffer not yet initialized. Dropping device lost event");
+                            GFXSTREAM_ERROR(
+                                "FrameBuffer not yet initialized. Dropping device lost event");
                             return;
                         }
                         fb->logVulkanDeviceLost();
@@ -959,7 +831,7 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
                     [](VkResult result, const char* function, int line) {
                         auto fb = gfxstream::FrameBuffer::getFB();
                         if (!fb) {
-                            stream_renderer_error(
+                            GFXSTREAM_ERROR(
                                 "FrameBuffer not yet initialized. Dropping out of memory event");
                             return;
                         }
@@ -970,29 +842,25 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
                        std::optional<uint64_t> allocationSize) {
                         auto fb = gfxstream::FrameBuffer::getFB();
                         if (!fb) {
-                            stream_renderer_error(
+                            GFXSTREAM_ERROR(
                                 "FrameBuffer not yet initialized. Dropping out of memory event");
                             return;
                         }
                         fb->logVulkanOutOfMemory(result, function, line, allocationSize);
                     }}));
 
-    if (!skip_opengles) {
-        // aemu currently does its own opengles initialization in
-        // qemu/android/android-emu/android/opengles.cpp.
-        ret =
-            stream_renderer_opengles_init(display_width, display_height, renderer_flags, features);
-        if (ret) {
-            return ret;
-        }
-    }
-
     GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_STREAM_RENDERER_CATEGORY, "stream_renderer_init()");
 
-    sFrontend()->init(renderer_cookie, features, fence_callback);
-    gfxstream::FrameBuffer::waitUntilInitialized();
+    auto renderer = GetRenderer(display_width, display_height, renderer_flags, features,
+                                rendererInitializedExternally);
+    if (!renderer) {
+        GFXSTREAM_ERROR("Failed to initialize Gfxstream renderer!");
+        return -EINVAL;
+    }
 
-    stream_renderer_info("Gfxstream initialized successfully!");
+    sFrontend()->init(renderer, renderer_cookie, features, fence_callback);
+
+    GFXSTREAM_INFO("Gfxstream initialized successfully!");
     return 0;
 }
 
@@ -1000,26 +868,20 @@ VG_EXPORT void gfxstream_backend_setup_window(void* native_window_handle, int32_
                                               int32_t window_y, int32_t window_width,
                                               int32_t window_height, int32_t fb_width,
                                               int32_t fb_height) {
-    android_showOpenglesWindow(native_window_handle, window_x, window_y, window_width,
-                               window_height, fb_width, fb_height, 1.0f, 0, false, false);
+    sFrontend()->setupWindow(native_window_handle, window_x, window_y, window_width,
+                               window_height, fb_width, fb_height);
 }
 
 VG_EXPORT void stream_renderer_teardown() {
     sFrontend()->teardown();
 
-    android_finishOpenglesRenderer();
-    android_hideOpenglesWindow();
-    android_stopOpenglesRenderer(true);
-
-    stream_renderer_info("Gfxstream shut down completed!");
+    GFXSTREAM_INFO("Gfxstream shut down completed!");
 }
 
 VG_EXPORT void gfxstream_backend_set_screen_mask(int width, int height,
-                                                 const unsigned char* rgbaData) {
-    android_setOpenglesScreenMask(width, height, rgbaData);
+                                                 const uint8_t* rgbaData) {
+    sFrontend()->setScreenMask(width, height, rgbaData);
 }
-
-const GoldfishPipeServiceOps* goldfish_pipe_get_service_ops() { return &goldfish_pipe_service_ops; }
 
 static_assert(sizeof(struct stream_renderer_device_id) == 32,
               "stream_renderer_device_id must be 32 bytes");
@@ -1055,13 +917,5 @@ static_assert(offsetof(struct stream_renderer_param, key) == 0,
               "stream_renderer_param.key must be at offset 0");
 static_assert(offsetof(struct stream_renderer_param, value) == 8,
               "stream_renderer_param.value must be at offset 8");
-
-#ifdef CONFIG_AEMU
-
-VG_EXPORT void stream_renderer_set_service_ops(const GoldfishPipeServiceOps* ops) {
-    sFrontend()->setServiceOps(ops);
-}
-
-#endif  // CONFIG_AEMU
 
 }  // extern "C"

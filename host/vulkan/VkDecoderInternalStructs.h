@@ -34,10 +34,11 @@
 #include "Handle.h"
 #include "VkEmulatedPhysicalDeviceMemory.h"
 #include "VkEmulatedPhysicalDeviceQueue.h"
-#include "aemu/base/files/Stream.h"
-#include "aemu/base/memory/SharedMemory.h"
-#include "aemu/base/synchronization/ConditionVariable.h"
-#include "aemu/base/synchronization/Lock.h"
+#include "render-utils/stream.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/memory/SharedMemory.h"
+#include "gfxstream/synchronization/ConditionVariable.h"
+#include "gfxstream/synchronization/Lock.h"
 #include "common/goldfish_vk_deepcopy.h"
 #include "vulkan/VkAndroidNativeBuffer.h"
 #include "vulkan/VkFormatUtils.h"
@@ -54,17 +55,18 @@ class ExternalFencePool {
 
     ~ExternalFencePool() {
         if (!mPool.empty()) {
-            GFXSTREAM_ABORT(emugl::FatalError(emugl::ABORT_REASON_OTHER))
-                << "External fence pool for device " << static_cast<void*>(mDevice)
-                << " destroyed but " << mPool.size() << " fences still not destroyed.";
+            GFXSTREAM_FATAL(
+                "External fence pool for VkDevice:%p destroyed but %zu fences still not destroyed.",
+                mDevice, mPool.size());
         }
     }
 
     void add(VkFence fence) {
-        android::base::AutoLock lock(mLock);
+        gfxstream::base::AutoLock lock(mLock);
         mPool.push_back(fence);
         if (mPool.size() > mMaxSize) {
-            INFO("External fence pool for %p has increased to size %d", mDevice, mPool.size());
+            GFXSTREAM_INFO("External fence pool for %p has increased to size %d", mDevice,
+                           mPool.size());
             mMaxSize = mPool.size();
         }
     }
@@ -72,7 +74,7 @@ class ExternalFencePool {
     VkFence pop(const VkFenceCreateInfo* pCreateInfo) {
         VkFence fence = VK_NULL_HANDLE;
         {
-            android::base::AutoLock lock(mLock);
+            gfxstream::base::AutoLock lock(mLock);
             auto it = std::find_if(mPool.begin(), mPool.end(), [this](const VkFence& fence) {
                 VkResult status = m_vk->vkGetFenceStatus(mDevice, fence);
                 if (status != VK_SUCCESS) {
@@ -101,7 +103,7 @@ class ExternalFencePool {
     }
 
     std::vector<VkFence> popAll() {
-        android::base::AutoLock lock(mLock);
+        gfxstream::base::AutoLock lock(mLock);
         std::vector<VkFence> popped = mPool;
         mPool.clear();
         return popped;
@@ -110,7 +112,7 @@ class ExternalFencePool {
    private:
     TDispatch* m_vk;
     VkDevice mDevice;
-    android::base::Lock mLock;
+    gfxstream::base::Lock mLock;
     std::vector<VkFence> mPool;
     size_t mMaxSize;
 };
@@ -141,6 +143,11 @@ private:
     void* mAddr{nullptr};
 };
 
+struct BoundMemoryRange {
+   VkDeviceSize offset;
+   VkDeviceSize size;
+};
+
 // We always map the whole size on host.
 // This makes it much easier to implement
 // the memory map API.
@@ -165,7 +172,7 @@ struct MemoryInfo {
     VkDevice device = VK_NULL_HANDLE;
     uint32_t memoryIndex = 0;
     // Set if the memory is backed by shared memory.
-    // std::optional<android::base::SharedMemory> sharedMemory;
+    // std::optional<gfxstream::base::SharedMemory> sharedMemory;
 
     std::shared_ptr<PrivateMemory> privateMemory;
     // virtio-gpu blobs
@@ -175,6 +182,25 @@ struct MemoryInfo {
     std::optional<HandleType> boundBuffer;
     // ColorBuffer, provided via vkAllocateMemory().
     std::optional<HandleType> boundColorBuffer;
+    std::unordered_map<VkBuffer, BoundMemoryRange> bufferMemoryRanges;
+};
+
+// to track VkEvent states
+struct EventInfo {
+    VkDevice device = VK_NULL_HANDLE;
+    VkEvent boxed = VK_NULL_HANDLE;
+    // Tracks the most recently used queue for signaling. From
+    // https://registry.khronos.org/vulkan/specs/latest/man/html/VkEvent.html
+    //
+    // Events must not be used to insert a dependency between commands submitted to different
+    // queues.
+    //
+    // so snapshot loading must potentially use the same queue.
+
+    VkQueue boxed_queue = VK_NULL_HANDLE;
+    bool isSignaled{false};
+    bool isFromHost{false};
+    VkPipelineStageFlags flags{0};
 };
 
 struct WebrogueMemoryInfo {
@@ -190,6 +216,7 @@ struct InstanceInfo {
     bool isAngle = false;
     std::string applicationName;
     std::string engineName;
+    uint32_t contextId = 0;
 };
 
 struct PhysicalDeviceInfo {
@@ -217,32 +244,94 @@ struct DeviceInfo {
     VkDevice boxed = nullptr;
     DebugUtilsHelper debugUtilsHelper = DebugUtilsHelper::withUtilsDisabled();
     std::unique_ptr<ExternalFencePool<VulkanDispatch>> externalFencePool = nullptr;
-    std::set<VkFormat> imageFormats = {};  // image formats used on this device
     std::unique_ptr<GpuDecompressionPipelineManager> decompPipelines = nullptr;
     DeviceOpTrackerPtr deviceOpTracker = nullptr;
     std::optional<uint32_t> virtioGpuContextId;
 
-    // True if this is a compressed image that needs to be decompressed on the GPU (with our
-    // compute shader)
-    bool needGpuDecompression(const CompressedImageInfo& cmpInfo) {
-        return ((cmpInfo.isEtc2() && emulateTextureEtc2) ||
-                (cmpInfo.isAstc() && emulateTextureAstc && !useAstcCpuDecompression));
-    }
-    bool needEmulatedDecompression(const CompressedImageInfo& cmpInfo) {
-        return ((cmpInfo.isEtc2() && emulateTextureEtc2) ||
-                (cmpInfo.isAstc() && emulateTextureAstc));
-    }
     bool needEmulatedDecompression(VkFormat format) {
-        return (gfxstream::vk::isEtc2(format) && emulateTextureEtc2) ||
-               (gfxstream::vk::isAstc(format) && emulateTextureAstc);
+        return (emulateTextureEtc2 && gfxstream::vk::isEtc2(format)) ||
+               (emulateTextureAstc && gfxstream::vk::isAstc(format));
     }
+
+#ifdef _WIN32
+    PFN_vkGetMemoryWin32HandleKHR getMemoryHandleFunc = nullptr;
+#else
+    PFN_vkGetMemoryFdKHR getMemoryHandleFunc = nullptr;
+#endif
+};
+
+struct PhysicalQueuePendingOps {
+    // Wrapper structure to defer queue submission calls, e.g. VkSubmitInfo2
+    // Pending operations will be checked and executed when the conditions are
+    // met, e.g. the valid timeline semaphore point is signalled.
+    // Normally, application should make safe submissions that'd avoid deadlock
+    // conditions, but when the virtual queue is active, we have to manually block
+    // the submissions until they can be executed safely, without blocking the
+    // signalling submissions.
+    struct DeferredSubmitCall {
+        std::vector<VkSubmitInfo> mSubmitInfos;
+        std::vector<VkSubmitInfo2> mSubmitInfo2s;
+        VkFence mFence;
+
+        bool addSubmitInfo(const VkSubmitInfo& submit) {
+            VkSubmitInfo submitInfoCopied;
+            deepcopy_VkSubmitInfo(&mPool, VK_STRUCTURE_TYPE_SUBMIT_INFO, &submit,
+                                  &submitInfoCopied);
+            mSubmitInfos.push_back(submitInfoCopied);
+            return true;
+        }
+
+        bool addSubmitInfo2(const VkSubmitInfo2& submit) {
+            VkSubmitInfo2 submitInfoCopied;
+            deepcopy_VkSubmitInfo2(&mPool, VK_STRUCTURE_TYPE_SUBMIT_INFO_2, &submit,
+                                   &submitInfoCopied);
+            mSubmitInfo2s.push_back(submitInfoCopied);
+            return true;
+        }
+
+        gfxstream::base::BumpPool mPool = gfxstream::base::BumpPool();
+    };
+
+    VkResult queuePendingSubmission(uint32_t submitCount, const VkSubmitInfo* pSubmits,
+                                    VkFence fence) {
+        auto deferredCall = std::make_unique<PhysicalQueuePendingOps::DeferredSubmitCall>();
+        for (uint32_t i = 0; i < submitCount; i++) {
+            if (!deferredCall->addSubmitInfo(pSubmits[i])) {
+                GFXSTREAM_ERROR("Unsupported submission type detected on virtual queue!");
+                return VK_ERROR_OUT_OF_HOST_MEMORY;
+            }
+        }
+        deferredCall->mFence = fence;
+        mSubmitCalls.push_back(std::move(deferredCall));
+        return VK_SUCCESS;
+    }
+
+    VkResult queuePendingSubmission(uint32_t submitCount, const VkSubmitInfo2* pSubmits,
+                                    VkFence fence) {
+        auto deferredCall = std::make_unique<PhysicalQueuePendingOps::DeferredSubmitCall>();
+        for (uint32_t i = 0; i < submitCount; i++) {
+            if (!deferredCall->addSubmitInfo2(pSubmits[i])) {
+                GFXSTREAM_ERROR("Unsupported submission type detected on virtual queue!");
+                return VK_ERROR_OUT_OF_HOST_MEMORY;
+            }
+        }
+        deferredCall->mFence = fence;
+        mSubmitCalls.push_back(std::move(deferredCall));
+        return VK_SUCCESS;
+    }
+
+    // Using heap allocation for submit calls storage, to ensure that the deep copied vulkan
+    // submit info structures and pointers in them will stay valid after add/erase operations
+    std::vector<std::unique_ptr<DeferredSubmitCall>> mSubmitCalls;
 };
 
 struct QueueInfo {
     std::shared_ptr<std::mutex> queueMutex;
+    std::shared_ptr<PhysicalQueuePendingOps> pendingOps;  // Only used if virtually shared
     VkDevice device;
     uint32_t queueFamilyIndex;
     VkQueue boxed = nullptr;
+    bool usingSharedPhysicalQueue = false;
 
     // In order to create a virtual queue handle, we use an offset to the physical
     // queue handle value. This assumes the new generated virtual handle value will
@@ -265,9 +354,11 @@ struct BufferInfo {
 
 struct ImageInfo {
     VkDevice device;
+    VkImage boxed = VK_NULL_HANDLE;
     VkImageCreateInfo imageCreateInfoShallow;
     // std::unique_ptr<AndroidNativeBufferInfo> anbInfo;
-    CompressedImageInfo cmpInfo;
+    // Compression info, only valid if texture needs emulated decompression
+    std::unique_ptr<CompressedImageInfo> compressInfo;
     // ColorBuffer, provided via vkAllocateMemory().
     std::optional<HandleType> boundColorBuffer;
     // TODO: might need to use an array of layouts to represent each sub resource
@@ -278,6 +369,7 @@ struct ImageInfo {
 struct ImageViewInfo {
     VkDevice device;
     bool needEmulatedAlpha = false;
+    VkImageView boxed = VK_NULL_HANDLE;
 
     // Color buffer, provided via vkAllocateMemory().
     std::optional<HandleType> boundColorBuffer;
@@ -287,9 +379,10 @@ struct ImageViewInfo {
 struct SamplerInfo {
     VkDevice device;
     bool needEmulatedAlpha = false;
+    VkSampler boxed = VK_NULL_HANDLE;
     VkSamplerCreateInfo createInfo = {};
     VkSampler emulatedborderSampler = VK_NULL_HANDLE;
-    android::base::BumpPool pool = android::base::BumpPool(256);
+    gfxstream::base::BumpPool pool = gfxstream::base::BumpPool(256);
     SamplerInfo() = default;
     SamplerInfo& operator=(const SamplerInfo& other) {
         deepcopy_VkSamplerCreateInfo(&pool, VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -330,13 +423,50 @@ struct FenceInfo {
 
 struct SemaphoreInfo {
     VkDevice device;
+    VkSemaphore boxed = VK_NULL_HANDLE;
     int externalHandleId = 0;
     VK_EXT_SYNC_HANDLE externalHandle = VK_EXT_SYNC_HANDLE_INVALID;
     // If this fence was used in an additional host operation that must be waited
     // upon before destruction (e.g. as part of a vkAcquireImageANDROID() call),
     // the waitable that tracking that host operation.
     std::optional<DeviceOpWaitable> latestUse;
+
+    bool isSignaled{false};        // only valid for binary semaphore
+    uint64_t lastSignalValue = 0;  // Only valid when the virtual queue feature is enabled
+    bool isTimelineSemaphore = false;
+
+    void onQueueSubmissionSignal() {
+        // From
+        // https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#synchronization-semaphores-signaling
+        //
+        //    When a batch is submitted to a queue via a queue submission and it
+        //    includes semaphores to be signaled, ... and defines semaphore
+        //    signal operations which set the semaphores to the signaled state.
+        //
+        // Track that here for snapshot handling:
+        if (!isTimelineSemaphore) {
+            isSignaled = true;
+        }
+    }
+
+    void onQueueSubmissionWait() {
+        // From
+        // https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#synchronization-semaphores-waiting
+        //
+        //    When a batch is submitted to a queue via a queue submission, and
+        //    it includes semaphores to be waited on, ... and defines semaphore
+        //    wait operations.
+        //
+        //    Such semaphore wait operations set the semaphores created with a
+        //    VkSemaphoreType of VK_SEMAPHORE_TYPE_BINARY to the unsignaled state.
+        //
+        // Track that here for snapshot handling:
+        if (!isTimelineSemaphore) {
+            isSignaled = false;
+        }
+    }
 };
+
 struct DescriptorSetLayoutInfo {
     VkDevice device = 0;
     VkDescriptorSetLayout boxed = 0;
@@ -445,6 +575,9 @@ struct CommandBufferInfo {
     std::unordered_map<HandleType, VkImageLayout> cbLayouts;
     std::unordered_map<VkImage, VkImageLayout> imageLayouts;
 
+    std::unordered_set<VkEvent> eventsSet;
+    std::unordered_set<VkEvent> eventsReset;
+
     void reset() {
         subCmds.clear();
         computePipeline = VK_NULL_HANDLE;
@@ -489,6 +622,7 @@ struct InstanceObjects {
         std::unordered_map<VkQueue, QueueInfo> queues;
         std::unordered_map<VkRenderPass, RenderPassInfo> renderPasses;
         std::unordered_map<VkSampler, SamplerInfo> samplers;
+        std::unordered_map<VkEvent, EventInfo> events;
         std::unordered_map<VkSemaphore, SemaphoreInfo> semaphores;
         std::unordered_map<VkShaderModule, ShaderModuleInfo> shaderModules;
     };

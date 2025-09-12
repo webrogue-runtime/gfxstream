@@ -13,18 +13,17 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-#include <GLcommon/ShareGroup.h>
-#include <GLcommon/ObjectNameSpace.h>
 #include <GLcommon/GLEScontext.h>
-
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/containers/Lookup.h"
-#include "GLcommon/FramebufferData.h"
-
-#include "host-common/logging.h"
+#include <GLcommon/ObjectNameSpace.h>
+#include <GLcommon/ShareGroup.h>
 
 #include <array>
 #include <utility>
+
+#include "GLcommon/FramebufferData.h"
+#include "gfxstream/containers/Lookup.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/common/logging.h"
 
 static constexpr int toIndex(NamedObjectType type) {
     return static_cast<int>(type);
@@ -43,7 +42,7 @@ struct ShareGroup::ObjectDataAutoLock {
 
 ShareGroup::ShareGroup(GlobalNameSpace *globalNameSpace,
                        uint64_t sharedGroupID,
-                       android::base::Stream* stream,
+                       gfxstream::Stream* stream,
                        const ObjectData::loadObject_t& loadObject) :
                        m_sharedGroupID(sharedGroupID) {
     ObjectDataAutoLock lock(this);
@@ -57,12 +56,14 @@ ShareGroup::ShareGroup(GlobalNameSpace *globalNameSpace,
         int i = 0;
         (void)i;
         for (auto ns : m_nameSpace) {
-            GL_LOG("ShareGroup::%s: %p: start restore namespace for type %d\n", __func__, this, i);
+            GFXSTREAM_DEBUG("ShareGroup::%s: %p: start restore namespace for type %d\n", __func__,
+                            this, i);
             ns->postLoad(
                     [this](NamedObjectType p_type, ObjectLocalName p_localName) {
                         return this->getObjectDataPtrNoLock(p_type, p_localName);
                 });
-            GL_LOG("ShareGroup::%s: %p: finish restore namespace for type %d\n", __func__, this, i);
+            GFXSTREAM_DEBUG("ShareGroup::%s: %p: finish restore namespace for type %d\n", __func__,
+                            this, i);
             ++i;
         }
     }
@@ -76,7 +77,7 @@ void ShareGroup::preSave(GlobalNameSpace *globalNameSpace) {
     m_nameSpace[(int)NamedObjectType::TEXTURE]->preSave(globalNameSpace);
 }
 
-void ShareGroup::onSave(android::base::Stream* stream) {
+void ShareGroup::onSave(gfxstream::Stream* stream) {
     // we do not save m_nameSpace
     ObjectDataAutoLock lock(this);
     if (m_saveStage == Saved) return;
@@ -85,14 +86,14 @@ void ShareGroup::onSave(android::base::Stream* stream) {
     int i = 0;
     (void)i;
     for (auto ns : m_nameSpace) {
-        GL_LOG("ShareGroup::%s: %p: start saving type %d\n", __func__, this, i);
+        GFXSTREAM_DEBUG("ShareGroup::%s: %p: start saving type %d\n", __func__, this, i);
         ns->onSave(stream);
-        GL_LOG("ShareGroup::%s: %p: finish saving type %d\n", __func__, this, i);
+        GFXSTREAM_DEBUG("ShareGroup::%s: %p: finish saving type %d\n", __func__, this, i);
         ++i;
     }
 }
 
-void ShareGroup::postSave(android::base::Stream* stream) {
+void ShareGroup::postSave(gfxstream::Stream* stream) {
     (void)stream;
     m_saveStage = Empty;
     // We need to mark the textures dirty, for those that has been bound to
@@ -107,17 +108,19 @@ void ShareGroup::postSave(android::base::Stream* stream) {
 }
 
 void ShareGroup::postLoadRestore() {
-    android::base::AutoLock lock(m_restoreLock);
+    gfxstream::base::AutoLock lock(m_restoreLock);
     if (m_needLoadRestore) {
         int i = 0;
         (void)i;
         for (auto ns : m_nameSpace) {
-            GL_LOG("ShareGroup::%s: %p: start post load restore namespace for type %d\n", __func__, this, i);
+            GFXSTREAM_DEBUG("ShareGroup::%s: %p: start post load restore namespace for type %d\n",
+                            __func__, this, i);
             ns->postLoadRestore([this](NamedObjectType p_type,
                                 ObjectLocalName p_localName) {
                                     return getGlobalName(p_type, p_localName);
                             });
-            GL_LOG("ShareGroup::%s: %p: end post load restore namespace for type %d\n", __func__, this, i);
+            GFXSTREAM_DEBUG("ShareGroup::%s: %p: end post load restore namespace for type %d\n",
+                            __func__, this, i);
             ++i;
         }
         m_needLoadRestore = false;
@@ -141,7 +144,7 @@ void ShareGroup::unlockObjectData() {
 ShareGroup::~ShareGroup()
 {
     {
-        android::base::AutoLock lock(m_namespaceLock);
+        gfxstream::base::AutoLock lock(m_namespaceLock);
         ObjectDataAutoLock objDataLock(this);
         for (auto n : m_nameSpace) {
             delete n;
@@ -160,7 +163,7 @@ ShareGroup::genName(GenNameInfo genNameInfo,
         return 0;
     }
 
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     ObjectLocalName localName =
             m_nameSpace[toIndex(genNameInfo.m_type)]->genName(
                                                     genNameInfo,
@@ -189,7 +192,7 @@ ShareGroup::getGlobalName(NamedObjectType p_type,
     if (toIndex(p_type) >= toIndex(NamedObjectType::NUM_OBJECT_TYPES)) {
         return 0;
     }
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     return m_nameSpace[toIndex(p_type)]->getGlobalName(p_localName);
 }
 
@@ -202,7 +205,7 @@ ShareGroup::getLocalName(NamedObjectType p_type,
         return 0;
     }
 
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     return m_nameSpace[toIndex(p_type)]->getLocalName(p_globalName);
 }
 
@@ -213,7 +216,7 @@ NamedObjectPtr ShareGroup::getNamedObject(NamedObjectType p_type,
         return 0;
     }
 
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     return m_nameSpace[toIndex(p_type)]->getNamedObject(p_localName);
 }
 
@@ -225,7 +228,7 @@ ShareGroup::deleteName(NamedObjectType p_type, ObjectLocalName p_localName)
         return;
     }
 
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     ObjectDataAutoLock objDataLock(this);
     m_nameSpace[toIndex(p_type)]->deleteName(p_localName);
 }
@@ -238,7 +241,7 @@ ShareGroup::isObject(NamedObjectType p_type, ObjectLocalName p_localName)
         return 0;
     }
 
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     return m_nameSpace[toIndex(p_type)]->isObject(p_localName);
 }
 
@@ -252,7 +255,7 @@ ShareGroup::replaceGlobalObject(NamedObjectType p_type,
         return;
     }
 
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     m_nameSpace[toIndex(p_type)]->replaceGlobalObject(p_localName,
                                                                p_globalObject);
 }
@@ -267,7 +270,7 @@ ShareGroup::setGlobalObject(NamedObjectType p_type,
         return;
     }
 
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     m_nameSpace[toIndex(p_type)]->setGlobalObject(p_localName,
                                                   p_globalObject);
 }
@@ -323,7 +326,7 @@ ObjectDataPtr ShareGroup::getObjectDataPtr(NamedObjectType p_type,
 #define CC_UNLIKELY( exp )  (__builtin_expect( !!(exp), false ))
 
 unsigned int ShareGroup::ensureObjectOnBind(NamedObjectType p_type, ObjectLocalName p_localName) {
-    android::base::AutoLock lock(m_namespaceLock);
+    gfxstream::base::AutoLock lock(m_namespaceLock);
     ObjectDataAutoLock objDataLock(this);
 
     auto ns = m_nameSpace[toIndex(p_type)];
@@ -384,15 +387,15 @@ ObjectNameManager::ObjectNameManager(GlobalNameSpace *globalNameSpace) :
 
 ShareGroupPtr
 ObjectNameManager::createShareGroup(void *p_groupName, uint64_t sharedGroupID,
-        android::base::Stream* stream, const ObjectData::loadObject_t& loadObject)
+        gfxstream::Stream* stream, const ObjectData::loadObject_t& loadObject)
 {
-    android::base::AutoLock lock(m_lock);
+    gfxstream::base::AutoLock lock(m_lock);
 
     ShareGroupPtr& shareGroupReturn = m_groups[p_groupName];
     if (!shareGroupReturn) {
         if (!sharedGroupID) {
             while (m_nextSharedGroupID == 0 ||
-                   android::base::contains(m_usedSharedGroupIDs,
+                   gfxstream::base::contains(m_usedSharedGroupIDs,
                                            m_nextSharedGroupID)) {
                 m_nextSharedGroupID ++;
             }
@@ -416,7 +419,7 @@ ObjectNameManager::createShareGroup(void *p_groupName, uint64_t sharedGroupID,
 ShareGroupPtr
 ObjectNameManager::getShareGroup(void *p_groupName)
 {
-    android::base::AutoLock lock(m_lock);
+    gfxstream::base::AutoLock lock(m_lock);
 
     ShareGroupPtr shareGroupReturn;
 
@@ -432,7 +435,7 @@ ShareGroupPtr
 ObjectNameManager::attachShareGroup(void *p_groupName,
                                     void *p_existingGroupName)
 {
-    android::base::AutoLock lock(m_lock);
+    gfxstream::base::AutoLock lock(m_lock);
 
     ShareGroupsMap::iterator s( m_groups.find(p_existingGroupName) );
     if (s == m_groups.end()) {
@@ -449,7 +452,7 @@ ObjectNameManager::attachShareGroup(void *p_groupName,
 }
 
 ShareGroupPtr ObjectNameManager::attachOrCreateShareGroup(void *p_groupName,
-        uint64_t p_existingGroupID, android::base::Stream* stream,
+        uint64_t p_existingGroupID, gfxstream::Stream* stream,
         const ObjectData::loadObject_t& loadObject) {
     assert(m_groups.find(p_groupName) == m_groups.end());
     ShareGroupsMap::iterator ite = p_existingGroupID ? m_groups.begin()
@@ -468,7 +471,7 @@ ShareGroupPtr ObjectNameManager::attachOrCreateShareGroup(void *p_groupName,
 void
 ObjectNameManager::deleteShareGroup(void *p_groupName)
 {
-    android::base::AutoLock lock(m_lock);
+    gfxstream::base::AutoLock lock(m_lock);
     auto sharedGroup = m_groups.find(p_groupName);
     if (sharedGroup == m_groups.end()) return;
     m_usedSharedGroupIDs.erase(sharedGroup->second->getId());
@@ -477,7 +480,7 @@ ObjectNameManager::deleteShareGroup(void *p_groupName)
 
 void *ObjectNameManager::getGlobalContext()
 {
-    android::base::AutoLock lock(m_lock);
+    gfxstream::base::AutoLock lock(m_lock);
     return m_groups.empty() ? nullptr : m_groups.begin()->first;
 }
 

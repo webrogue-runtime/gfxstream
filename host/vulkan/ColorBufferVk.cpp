@@ -24,10 +24,10 @@ std::unique_ptr<ColorBufferVk> ColorBufferVk::create(VkEmulation& vkEmulation, u
                                                      uint32_t width, uint32_t height, GLenum format,
                                                      FrameworkFormat frameworkFormat,
                                                      bool vulkanOnly, uint32_t memoryProperty,
-                                                     android::base::Stream* stream) {
+                                                     gfxstream::Stream* stream, uint32_t mipLevels) {
     if (!vkEmulation.createVkColorBuffer(width, height, format, frameworkFormat, handle, vulkanOnly,
-                                         memoryProperty)) {
-        GL_LOG("Failed to create ColorBufferVk:%d", handle);
+                                         memoryProperty, mipLevels)) {
+        GFXSTREAM_DEBUG("Failed to create ColorBufferVk:%d", handle);
         return nullptr;
     }
     if (vkEmulation.getFeatures().VulkanSnapshots.enabled && stream) {
@@ -37,7 +37,7 @@ std::unique_ptr<ColorBufferVk> ColorBufferVk::create(VkEmulation& vkEmulation, u
     return std::unique_ptr<ColorBufferVk>(new ColorBufferVk(vkEmulation, handle));
 }
 
-void ColorBufferVk::onSave(android::base::Stream* stream) {
+void ColorBufferVk::onSave(gfxstream::Stream* stream) {
     if (!mVkEmulation.getFeatures().VulkanSnapshots.enabled) {
         return;
     }
@@ -49,7 +49,7 @@ ColorBufferVk::ColorBufferVk(VkEmulation& vkEmulation, uint32_t handle)
 
 ColorBufferVk::~ColorBufferVk() {
     if (!mVkEmulation.teardownVkColorBuffer(mHandle)) {
-        ERR("Failed to destroy ColorBufferVk:%d", mHandle);
+        GFXSTREAM_ERROR("Failed to destroy ColorBufferVk:%d", mHandle);
     }
 }
 
@@ -85,13 +85,7 @@ std::optional<BlobDescriptorInfo> ColorBufferVk::exportBlob() {
         return BlobDescriptorInfo{
             .descriptorInfo =
                 {
-#ifdef _WIN32
-                    .descriptor = ManagedDescriptor(static_cast<DescriptorType>(
-                        reinterpret_cast<void*>(info->handleInfo.handle))),
-#else
-                    .descriptor =
-                        ManagedDescriptor(static_cast<DescriptorType>(info->handleInfo.handle)),
-#endif
+                    .descriptor = info->handleInfo.toManagedDescriptor(),
                     .streamHandleType = info->handleInfo.streamHandleType,
                 },
             .caching = 0,

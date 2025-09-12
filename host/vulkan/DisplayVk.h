@@ -1,3 +1,17 @@
+// Copyright 2025 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either expresso or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #ifndef DISPLAY_VK_H
 #define DISPLAY_VK_H
 
@@ -10,13 +24,13 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "BorrowedImage.h"
+#include "gfxstream/host/borrowed_image.h"
 #include "CompositorVk.h"
-#include "Display.h"
+#include "gfxstream/host/display.h"
 #include "DisplaySurfaceVk.h"
 #include "Hwc2.h"
 #include "SwapChainStateVk.h"
-#include "aemu/base/synchronization/Lock.h"
+#include "gfxstream/synchronization/Lock.h"
 #include "goldfish_vk_dispatch.h"
 
 // The DisplayVk class holds the Vulkan and other states required to draw a
@@ -29,13 +43,14 @@ class DisplayVk : public gfxstream::Display {
    public:
     DisplayVk(const VulkanDispatch&, VkPhysicalDevice, uint32_t swapChainQueueFamilyIndex,
               uint32_t compositorQueueFamilyIndex, VkDevice, VkQueue compositorVkQueue,
-              std::shared_ptr<android::base::Lock> compositorVkQueueLock, VkQueue swapChainVkQueue,
-              std::shared_ptr<android::base::Lock> swapChainVkQueueLock);
+              std::shared_ptr<gfxstream::base::Lock> compositorVkQueueLock, VkQueue swapChainVkQueue,
+              std::shared_ptr<gfxstream::base::Lock> swapChainVkQueueLock);
     ~DisplayVk();
 
     PostResult post(const BorrowedImageInfo* info);
 
     void drainQueues();
+    void clear();
 
    protected:
     void bindToSurfaceImpl(gfxstream::DisplaySurface* surface) override;
@@ -62,9 +77,9 @@ class DisplayVk : public gfxstream::Display {
     uint32_t m_compositorQueueFamilyIndex;
     VkDevice m_vkDevice;
     VkQueue m_compositorVkQueue;
-    std::shared_ptr<android::base::Lock> m_compositorVkQueueLock;
+    std::shared_ptr<gfxstream::base::Lock> m_compositorVkQueueLock;
     VkQueue m_swapChainVkQueue;
-    std::shared_ptr<android::base::Lock> m_swapChainVkQueueLock;
+    std::shared_ptr<gfxstream::base::Lock> m_swapChainVkQueueLock;
     VkCommandPool m_vkCommandPool;
 
     class PostResource {

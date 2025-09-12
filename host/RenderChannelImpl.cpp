@@ -13,25 +13,62 @@
 // limitations under the License.
 #include "RenderChannelImpl.h"
 
-#include "GraphicsDriverLock.h"
-#include "RenderThread.h"
-#include "aemu/base/synchronization/Lock.h"
-
 #include <algorithm>
-#include <utility>
-
 #include <assert.h>
 #include <string.h>
+#include <utility>
 
-#define EMUGL_DEBUG_LEVEL 0
-#include "host-common/debug.h"
+#include "gfxstream/host/graphics_driver_lock.h"
+#include "RenderThread.h"
+#include "gfxstream/synchronization/Lock.h"
 
 namespace gfxstream {
+namespace {
 
 using Buffer = RenderChannel::Buffer;
-using IoResult = android::base::BufferQueueResult;
 using State = RenderChannel::State;
-using AutoLock = android::base::AutoLock;
+using gfxstream::base::AutoLock;
+using gfxstream::BufferQueueResult;
+
+RenderChannel::IoResult
+ToIoResult(gfxstream::BufferQueueResult result) {
+    switch (result) {
+        case BufferQueueResult::Ok: {
+            return RenderChannel::IoResult::Ok;
+        }
+        case BufferQueueResult::TryAgain: {
+            return RenderChannel::IoResult::TryAgain;
+        }
+        case BufferQueueResult::Error: {
+            return RenderChannel::IoResult::Error;
+        }
+        case BufferQueueResult::Timeout: {
+            return RenderChannel::IoResult::Timeout;
+        }
+    }
+}
+
+
+// TODO: Delete after fully migrating Gfxstream interface to gfxstream::base::Stream.
+class AemuStreamToGfxstreamStreamWrapper : public gfxstream::Stream {
+  public:
+    AemuStreamToGfxstreamStreamWrapper(gfxstream::Stream* stream)
+        : mStream(stream) {}
+
+    ssize_t read(void* buffer, size_t size) override {
+        return mStream->read(buffer, size);
+    }
+
+    ssize_t write(const void* buffer, size_t size) override {
+        return mStream->write(buffer, size);
+    }
+
+  private:
+    gfxstream::Stream* const mStream = nullptr;
+};
+
+}  // namespace
+
 
 // These constants correspond to the capacities of buffer queues
 // used by each RenderChannelImpl instance. Benchmarking shows that
@@ -46,12 +83,13 @@ static constexpr size_t kGuestToHostQueueCapacity = 1024U;
 #endif
 static constexpr size_t kHostToGuestQueueCapacity = 16U;
 
-RenderChannelImpl::RenderChannelImpl(android::base::Stream* loadStream, uint32_t contextId)
+RenderChannelImpl::RenderChannelImpl(gfxstream::Stream* loadStream, uint32_t contextId)
     : mFromGuest(kGuestToHostQueueCapacity, mLock),
       mToGuest(kHostToGuestQueueCapacity, mLock) {
     if (loadStream) {
-        mFromGuest.onLoadLocked(loadStream);
-        mToGuest.onLoadLocked(loadStream);
+        AemuStreamToGfxstreamStreamWrapper loadStreamWrapped(loadStream);
+        mFromGuest.onLoadLocked(&loadStreamWrapped);
+        mToGuest.onLoadLocked(&loadStreamWrapped);
         mState = (State)loadStream->getBe32();
         mWantedEvents = (State)loadStream->getBe32();
 #ifndef NDEBUG
@@ -73,7 +111,6 @@ void RenderChannelImpl::setEventCallback(EventCallback&& callback) {
 }
 
 void RenderChannelImpl::setWantedEvents(State state) {
-    D("state=%d", (int)state);
     AutoLock lock(mLock);
     mWantedEvents |= state;
     notifyStateChangeLocked();
@@ -84,14 +121,12 @@ RenderChannel::State RenderChannelImpl::state() const {
     return mState;
 }
 
-IoResult RenderChannelImpl::tryWrite(Buffer&& buffer) {
-    D("buffer size=%d", (int)buffer.size());
+RenderChannelImpl::IoResult
+RenderChannelImpl::tryWrite(Buffer&& buffer) {
     AutoLock lock(mLock);
     auto result = mFromGuest.tryPushLocked(std::move(buffer));
     updateStateLocked();
-    DD("mFromGuest.tryPushLocked() returned %d, state %d", (int)result,
-       (int)mState);
-    return result;
+    return ToIoResult(result);
 }
 
 void RenderChannelImpl::waitUntilWritable() {
@@ -99,24 +134,20 @@ void RenderChannelImpl::waitUntilWritable() {
     mFromGuest.waitUntilPushableLocked();
 }
 
-IoResult RenderChannelImpl::tryRead(Buffer* buffer) {
-    D("enter");
+RenderChannelImpl::IoResult
+RenderChannelImpl::tryRead(Buffer* buffer) {
     AutoLock lock(mLock);
     auto result = mToGuest.tryPopLocked(buffer);
     updateStateLocked();
-    DD("mToGuest.tryPopLocked() returned %d, buffer size %d, state %d",
-       (int)result, (int)buffer->size(), (int)mState);
-    return result;
+    return ToIoResult(result);
 }
 
-IoResult RenderChannelImpl::readBefore(Buffer* buffer, Duration waitUntilUs) {
-    D("enter");
+RenderChannelImpl::IoResult
+RenderChannelImpl::readBefore(Buffer* buffer, Duration waitUntilUs) {
     AutoLock lock(mLock);
     auto result = mToGuest.popLockedBefore(buffer, waitUntilUs);
     updateStateLocked();
-    DD("mToGuest.popLockedBefore() returned %d, buffer size %d, state %d",
-       (int)result, (int)buffer->size(), (int)mState);
-    return result;
+    return ToIoResult(result);
 }
 
 void RenderChannelImpl::waitUntilReadable() {
@@ -125,7 +156,6 @@ void RenderChannelImpl::waitUntilReadable() {
 }
 
 void RenderChannelImpl::stop() {
-    D("enter");
     AutoLock lock(mLock);
     mFromGuest.closeLocked();
     mToGuest.closeLocked();
@@ -133,35 +163,28 @@ void RenderChannelImpl::stop() {
 }
 
 bool RenderChannelImpl::writeToGuest(Buffer&& buffer) {
-    D("buffer size=%d", (int)buffer.size());
     AutoLock lock(mLock);
-    IoResult result = mToGuest.pushLocked(std::move(buffer));
+    auto result = mToGuest.pushLocked(std::move(buffer));
     updateStateLocked();
-    D("mToGuest.pushLocked() returned %d, state %d", (int)result, (int)mState);
     notifyStateChangeLocked();
-    return result == IoResult::Ok;
+    return result == BufferQueueResult::Ok;
 }
 
-IoResult RenderChannelImpl::readFromGuest(Buffer* buffer, bool blocking) {
-    D("enter");
+RenderChannelImpl::IoResult
+RenderChannelImpl::readFromGuest(Buffer* buffer, bool blocking) {
     AutoLock lock(mLock);
-    IoResult result;
+    BufferQueueResult result;
     if (blocking) {
         result = mFromGuest.popLocked(buffer);
     } else {
         result = mFromGuest.tryPopLocked(buffer);
     }
     updateStateLocked();
-    DD("mFromGuest.%s() return %d, buffer size %d, state %d",
-       blocking ? "popLocked" : "tryPopLocked", (int)result,
-       (int)buffer->size(), (int)mState);
     notifyStateChangeLocked();
-    return result;
+    return ToIoResult(result);
 }
 
 void RenderChannelImpl::stopFromHost() {
-    D("enter");
-
     AutoLock lock(mLock);
     mFromGuest.closeLocked();
     mToGuest.closeLocked();
@@ -195,7 +218,7 @@ RenderChannelImpl::~RenderChannelImpl() {
     // Make sure the render thread is stopped before the channel is gone.
     mRenderThread->waitForFinished();
     {
-        AutoLock lock(*graphicsDriverLock());
+        gfxstream::base::AutoLock lock(*graphicsDriverLock());
         mRenderThread->sendExitSignal();
         mRenderThread->wait();
     }
@@ -220,17 +243,17 @@ void RenderChannelImpl::notifyStateChangeLocked() {
     // Always report stop events, event if not explicitly asked for.
     State available = mState & (mWantedEvents | State::Stopped);
     if (available != 0) {
-        D("callback with %d", (int)available);
         mWantedEvents &= ~mState;
         mEventCallback(available);
     }
 }
 
-void RenderChannelImpl::onSave(android::base::Stream* stream) {
-    D("enter");
+void RenderChannelImpl::onSave(gfxstream::Stream* stream) {
     AutoLock lock(mLock);
-    mFromGuest.onSaveLocked(stream);
-    mToGuest.onSaveLocked(stream);
+
+    AemuStreamToGfxstreamStreamWrapper saveStreamWrapped(stream);
+    mFromGuest.onSaveLocked(&saveStreamWrapped);
+    mToGuest.onSaveLocked(&saveStreamWrapped);
     stream->putBe32(static_cast<uint32_t>(mState));
     stream->putBe32(static_cast<uint32_t>(mWantedEvents));
     lock.unlock();

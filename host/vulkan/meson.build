@@ -1,5 +1,5 @@
 # Copyright 2023 Android Open Source Project
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 inc_cereal = include_directories('cereal')
 inc_cereal_common = include_directories('cereal/common')
@@ -13,6 +13,7 @@ files_lib_vulkan_server = files(
   'BufferVk.cpp',
   'ColorBufferVk.cpp',
   'CompositorVk.cpp',
+  'DependencyGraph.cpp',
   'DeviceLostHelper.cpp',
   'DeviceOpTracker.cpp',
   'DisplayVk.cpp',
@@ -31,11 +32,11 @@ files_lib_vulkan_server = files(
   'VkDecoderSnapshotUtils.cpp',
   'VkFormatUtils.cpp',
   'VkReconstruction.cpp',
+  'VkUtils.cpp',
   'VulkanBoxedHandles.cpp',
   'VulkanDispatch.cpp',
   'VulkanHandleMapping.cpp',
   'VulkanStream.cpp',
-  'vk_util.cpp'
 )
 
 vulkan_server_cpp_args = [
@@ -47,10 +48,14 @@ vulkan_server_cpp_args = [
   '-Wno-uninitialized',
   '-DVK_GFXSTREAM_STRUCTURE_TYPE_EXT',
 ]
+if host_machine.system() == 'windows'
+  vulkan_server_cpp_args += '-Wa,-mbig-obj'
+endif
 
-# Shouldn't these be defined by standard Vulkan headers?
+
 if host_machine.system() == 'darwin'
   vulkan_server_cpp_args += '-DVK_USE_PLATFORM_METAL_EXT'
+  vulkan_server_cpp_args += '-DVK_USE_PLATFORM_MACOS_MVK'
 elif host_machine.system() == 'windows'
   vulkan_server_cpp_args += '-DVK_USE_PLATFORM_WIN32_KHR'
 elif host_machine.system() == 'qnx'
@@ -61,12 +66,49 @@ lib_vulkan_server = static_library(
   'lib_vulkan_server',
   files_lib_vulkan_server,
   cpp_args: vulkan_server_cpp_args + gfxstream_host_args,
-  include_directories: [inc_root, inc_gfxstream_include, inc_include, inc_utils, inc_apigen_codec,
-                        inc_cereal, inc_cereal_common, inc_stream_servers,
-                        inc_vulkan_server, inc_renderdoc_external,
-                        inc_gl_host_common, inc_vulkan_headers, inc_glm, inc_host_backend,
-                        inc_host_features, inc_host_tracing, inc_common_utils],
-  link_with: [lib_vulkan_cereal, lib_emulated_textures, lib_host_backend, lib_host_features,
-              lib_host_tracing],
-  dependencies: [aemu_base_dep, aemu_common_dep, aemu_snapshot_dep]
+  include_directories: [
+    inc_cereal_common,
+    inc_cereal,
+    inc_common_base,
+    inc_common_utils,
+    inc_gl_openglesdispatch,
+    inc_gl_server,
+    inc_glm,
+    inc_host_backend,
+    inc_host_compressed_textures,
+    inc_host_decoder_common,
+    inc_host_features,
+    inc_host_health,
+    inc_host_include,
+    inc_host_iostream,
+    inc_host_library,
+    inc_common_logging,
+    inc_host_metrics,
+    inc_host_renderdoc,
+    inc_host_snapshot,
+    inc_host_tracing,
+    inc_include,
+    inc_opengl_headers,
+    inc_renderdoc_external,
+    inc_root,
+    inc_stream_servers,
+    inc_vulkan_headers,
+    inc_vulkan_server,
+  ],
+  link_with: [
+    lib_common_base,
+    lib_emulated_textures,
+    lib_host_backend,
+    lib_host_compressed_textures,
+    lib_host_features,
+    lib_host_health,
+    lib_host_iostream,
+    lib_host_library,
+    lib_common_logging,
+    lib_common_logging,
+    lib_host_metrics,
+    lib_host_snapshot,
+    lib_host_tracing,
+    lib_vulkan_cereal,
+  ],
 )

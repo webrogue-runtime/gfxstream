@@ -1,3 +1,17 @@
+# Copyright 2025 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 add_subdirectory(cereal)
 add_subdirectory(emulated_textures)
 
@@ -11,6 +25,7 @@ add_library(gfxstream-vulkan-server
             BufferVk.cpp
             ColorBufferVk.cpp
             CompositorVk.cpp
+            DependencyGraph.cpp
             DeviceLostHelper.cpp
             DeviceOpTracker.cpp
             DisplayVk.cpp
@@ -29,34 +44,41 @@ add_library(gfxstream-vulkan-server
             VkEmulatedPhysicalDeviceQueue.cpp
             VkFormatUtils.cpp
             VkReconstruction.cpp
+            VkUtils.cpp
             VulkanBoxedHandles.cpp
             VulkanDispatch.cpp
             VulkanHandleMapping.cpp
             VulkanStream.cpp
-            vk_util.cpp)
+            )
 set_source_files_properties(VkDecoder.cpp PROPERTIES COMPILE_FLAGS -Wno-unused-variable)
 set_source_files_properties(VkSubDecoder.cpp PROPERTIES COMPILE_FLAGS -Wno-unused-variable)
 set_source_files_properties(VkDecoderSnapshot.cpp PROPERTIES COMPILE_FLAGS -Wno-unused-variable)
 
 target_link_libraries(gfxstream-vulkan-server PUBLIC
-        OpenglRender_vulkan_cereal
-        gfxstream-compressedTextures
+        gfxstream_host_decoder_common
         emulated_textures
-        apigen-codec-common
-        aemu-base.headers
-        gfxstream_backend_common
+        gfxstream_common_base
+        gfxstream_common_logging
         gfxstream_features
+        gfxstream_host_backend
+        gfxstream_host_compressed_textures
+        gfxstream_host_health
+        gfxstream_host_iostream
+        gfxstream_host_library
+        gfxstream_host_renderdoc
+        gfxstream_host_snapshot.headers
         gfxstream_host_tracing
-        gfxstream-snapshot.headers
-        gfxstream_utils
+        gfxstream_openglesdispatch.headers
         gfxstream_vulkan_headers
+        OpenglRender_vulkan_cereal
         PRIVATE
-        gfxstream_egl_headers)
+        gfxstream_opengl_headers
+        )
 
 if (WIN32)
 target_compile_definitions(gfxstream-vulkan-server PRIVATE -DVK_USE_PLATFORM_WIN32_KHR)
 elseif (APPLE)
-target_compile_definitions(gfxstream-vulkan-server PRIVATE -DVK_USE_PLATFORM_METAL_EXT)
+target_compile_definitions(gfxstream-vulkan-server PRIVATE -DVK_USE_PLATFORM_METAL_EXT -DVK_USE_PLATFORM_MACOS_MVK)
 elseif (QNX)
 target_compile_definitions(gfxstream-vulkan-server PRIVATE -DVK_USE_PLATFORM_SCREEN_QNX)
 endif()
@@ -68,7 +90,8 @@ target_compile_options(gfxstream-vulkan-server
     PRIVATE
     -Wall
     -Wextra
-    -Werror
+    # TODO: renable
+    #-Werror
     -Wno-missing-field-initializers
     -Wno-unused-parameter
     -Wno-unused-private-field
@@ -82,10 +105,9 @@ target_include_directories(gfxstream-vulkan-server
                            ${GFXSTREAM_REPO_ROOT}/vulkan/cereal
                            PRIVATE
                            ${GFXSTREAM_REPO_ROOT}
-                           ${GFXSTREAM_REPO_ROOT}/include
                            ${GFXSTREAM_REPO_ROOT}/host
+                           ${GFXSTREAM_REPO_ROOT}/host/gl
                            ${GFXSTREAM_REPO_ROOT}/host/tracing
                            ${GFXSTREAM_REPO_ROOT}/host/vulkan
                            ${GFXSTREAM_REPO_ROOT}/host/vulkan/cereal/common
-                           ${GFXSTREAM_REPO_ROOT}/host/apigen-codec-common
-                           ${GFXSTREAM_REPO_ROOT}/third-party/glm/include)
+                           ${GFXSTREAM_REPO_ROOT}/third_party/glm/include)

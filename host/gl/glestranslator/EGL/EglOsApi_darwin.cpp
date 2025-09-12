@@ -13,21 +13,18 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-#include "EglOsApi.h"
-
-#include "MacNative.h"
-
-#include "aemu/base/containers/Lookup.h"
-#include "aemu/base/SharedLibrary.h"
-
-#include "host-common/logging.h"
-#include "GLcommon/GLLibrary.h"
-
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
 #include <numeric>
 #include <unordered_map>
+
+#include "EglOsApi.h"
+#include "GLcommon/GLLibrary.h"
+#include "MacNative.h"
+#include "gfxstream/SharedLibrary.h"
+#include "gfxstream/containers/Lookup.h"
+#include "gfxstream/common/logging.h"
 
 #define MAX_PBUFFER_MIPMAP_LEVEL 1
 
@@ -268,7 +265,7 @@ public:
                                   MacPixelFormat::from(pixelFormat)->handle());
 
         void* nsFormat = nullptr;
-        if (auto format = android::base::find(sFinalizedConfigs, key)) {
+        if (auto format = gfxstream::base::find(sFinalizedConfigs, key)) {
             nsFormat = *format;
         } else {
             nsFormat =
@@ -371,10 +368,10 @@ public:
         static const char kLibName[] =
                 "/System/Library/Frameworks/OpenGL.framework/OpenGL";
         char error[256];
-        mLib = android::base::SharedLibrary::open(kLibName, error, sizeof(error));
+        mLib = gfxstream::base::SharedLibrary::open(kLibName, error, sizeof(error));
         if (!mLib) {
-            ERR("%s: Could not open GL library %s [%s]\n",
-                __FUNCTION__, kLibName, error);
+            GFXSTREAM_ERROR("%s: Could not open GL library %s [%s]\n", __FUNCTION__, kLibName,
+                            error);
         }
     }
 
@@ -390,7 +387,7 @@ public:
     }
 
 private:
-    android::base::SharedLibrary* mLib = nullptr;
+    gfxstream::base::SharedLibrary* mLib = nullptr;
 };
 
 class MacEngine : public EglOS::Engine {
@@ -416,16 +413,10 @@ private:
     MacGlLibrary mGlLib;
 };
 
-static MacEngine* sHostEngine = nullptr;
-
 }  // namespace
 
-
 // static
-EglOS::Engine* EglOS::Engine::getHostInstance() {
-    if (!sHostEngine) {
-        sHostEngine = new MacEngine();
-    }
-    return sHostEngine;
+EglOS::Engine* EglOS::Engine::createHostInstance() {
+    return new MacEngine();
 }
 

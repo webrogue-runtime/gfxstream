@@ -16,18 +16,17 @@
 #include "PostWorkerGl.h"
 
 #include "FrameBuffer.h"
-#include "gl/DisplayGl.h"
-#include "gl/DisplaySurfaceGl.h"
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/logging.h"
-#include "host-common/misc.h"
+#include "gfxstream/host/display_operations.h"
+#include "gfxstream/common/logging.h"
+#include "gfxstream/host/renderer_operations.h"
+#include "gfxstream/host/window_operations.h"
+#include "DisplayGl.h"
+#include "DisplaySurfaceGl.h"
 
 namespace gfxstream {
 
 namespace {
 
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
 using gl::DisplayGl;
 using gl::DisplaySurfaceGl;
 using gl::EmulationGl;
@@ -54,16 +53,8 @@ PostWorkerGl::PostWorkerGl(bool mainThreadPostingOnly, FrameBuffer* fb, Composit
       m_displayGl(displayGl),
       mEmulationGl(emulationGl) {
     if (!m_displayGl) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << "PostWorker missing DisplayGl.";
+        GFXSTREAM_FATAL("PostWorker missing DisplayGl.");
     }
-}
-
-void PostWorkerGl::screenshot(ColorBuffer* cb, int screenwidth, int screenheight, GLenum format,
-                              GLenum type, int skinRotation, void* pixels, Rect rect) {
-    // See b/292237104.
-    mFb->lock();
-    cb->readToBytesScaled(screenwidth, screenheight, format, type, skinRotation, rect, pixels);
-    mFb->unlock();
 }
 
 std::shared_future<void> PostWorkerGl::postImpl(ColorBuffer* cb) {
@@ -73,9 +64,6 @@ std::shared_future<void> PostWorkerGl::postImpl(ColorBuffer* cb) {
         // requires frequent rebinds.
         setupContext();
     }
-    std::shared_future<void> completedFuture = std::async(std::launch::deferred, [] {}).share();
-    completedFuture.wait();
-
     DisplayGl::Post post = {};
 
     ComposeLayer postLayerOptions = {
@@ -85,43 +73,42 @@ std::shared_future<void> PostWorkerGl::postImpl(ColorBuffer* cb) {
         .transform = HWC_TRANSFORM_NONE,
     };
 
-    const auto& multiDisplay = emugl::get_emugl_multi_display_operations();
-    const bool pixel_fold = multiDisplay.isPixelFold();
+    const auto& multiDisplay = get_gfxstream_multi_display_operations();
+    const bool pixel_fold = multiDisplay.is_pixel_fold();
     if (pixel_fold) {
 #ifdef CONFIG_AEMU
-        if (emugl::shouldSkipDraw()) {
+        if (get_gfxstream_should_skip_draw()) {
             post.layers.clear();
         } else {
             post.layers.push_back(postWithOverlay(cb));
         }
 #endif
-    }
-    else if (multiDisplay.isMultiDisplayEnabled()) {
-        if (multiDisplay.isMultiDisplayWindow()) {
+    } else if (multiDisplay.is_multi_display_enabled()) {
+        if (multiDisplay.is_multi_window()) {
             int32_t previousDisplayId = -1;
             uint32_t currentDisplayId;
             uint32_t currentDisplayColorBufferHandle;
-            while (multiDisplay.getNextMultiDisplay(previousDisplayId, &currentDisplayId,
-                                                    /*x=*/nullptr,
-                                                    /*y=*/nullptr,
-                                                    /*w=*/nullptr,
-                                                    /*h=*/nullptr,
-                                                    /*dpi=*/nullptr,
-                                                    /*flags=*/nullptr,
-                                                    &currentDisplayColorBufferHandle)) {
+            while (multiDisplay.get_next_display_info(previousDisplayId, &currentDisplayId,
+                                                      /*x=*/nullptr,
+                                                      /*y=*/nullptr,
+                                                      /*w=*/nullptr,
+                                                      /*h=*/nullptr,
+                                                      /*dpi=*/nullptr,
+                                                      /*flags=*/nullptr,
+                                                      &currentDisplayColorBufferHandle)) {
                 previousDisplayId = currentDisplayId;
 
                 if (currentDisplayColorBufferHandle == 0) {
                     continue;
                 }
-                emugl::get_emugl_window_operations().paintMultiDisplayWindow(
+                get_gfxstream_window_operations().paint_multi_display_window(
                     currentDisplayId, currentDisplayColorBufferHandle);
             }
             post.layers.push_back(postWithOverlay(cb));
         } else {
             uint32_t combinedDisplayW = 0;
             uint32_t combinedDisplayH = 0;
-            multiDisplay.getCombinedDisplaySize(&combinedDisplayW, &combinedDisplayH);
+            multiDisplay.get_combined_size(&combinedDisplayW, &combinedDisplayH);
 
             post.frameWidth = combinedDisplayW;
             post.frameHeight = combinedDisplayH;
@@ -133,7 +120,7 @@ std::shared_future<void> PostWorkerGl::postImpl(ColorBuffer* cb) {
             uint32_t currentDisplayW;
             uint32_t currentDisplayH;
             uint32_t currentDisplayColorBufferHandle;
-            while (multiDisplay.getNextMultiDisplay(
+            while (multiDisplay.get_next_display_info(
                 previousDisplayId, &currentDisplayId, &currentDisplayOffsetX,
                 &currentDisplayOffsetY, &currentDisplayW, &currentDisplayH,
                 /*dpi=*/nullptr,
@@ -177,7 +164,7 @@ std::shared_future<void> PostWorkerGl::postImpl(ColorBuffer* cb) {
                 });
             }
         }
-    } else if (emugl::get_emugl_window_operations().isFolded()) {
+    } else if (get_gfxstream_window_operations().is_folded()) {
         const float dpr = mFb->getDpr();
 
         post.frameWidth = m_viewportWidth / dpr;
@@ -187,8 +174,8 @@ std::shared_future<void> PostWorkerGl::postImpl(ColorBuffer* cb) {
         int displayOffsetY;
         int displayW;
         int displayH;
-        emugl::get_emugl_window_operations().getFoldedArea(&displayOffsetX, &displayOffsetY,
-                                                           &displayW, &displayH);
+        get_gfxstream_window_operations().get_folded_area(&displayOffsetX, &displayOffsetY,
+                                                          &displayW, &displayH);
 
         postLayerOptions.displayFrame = {
             .left = 0,
@@ -255,7 +242,7 @@ void PostWorkerGl::viewportImpl(int width, int height) {
     m_viewportHeight = height * dpr;
 
     if (!m_displayGl) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << "PostWorker missing DisplayGl.";
+        GFXSTREAM_FATAL("PostWorker missing DisplayGl.");
     }
     m_displayGl->viewport(m_viewportWidth, m_viewportHeight);
 }
@@ -281,7 +268,7 @@ std::shared_future<void> PostWorkerGl::composeImpl(const FlatComposeRequest& com
 }
 
 void PostWorkerGl::setupContext() {
-    android::base::AutoLock lock(mMutex);
+    std::lock_guard<std::mutex> lock(mMutex);
     const auto* surface = getBoundSurface();
     const DisplaySurfaceGl* surfaceGl = nullptr;
     if (surface) {
@@ -295,7 +282,7 @@ void PostWorkerGl::setupContext() {
             mFakeWindowSurface = mEmulationGl->createFakeWindowSurface();
         }
         if (!mFakeWindowSurface) {
-            ERR("Post worker does not have a window surface.");
+            GFXSTREAM_ERROR("Post worker does not have a window surface.");
             return;
         }
         surfaceGl = static_cast<const DisplaySurfaceGl*>(mFakeWindowSurface->getImpl());
@@ -309,7 +296,7 @@ void PostWorkerGl::setupContext() {
     // (2) they both need to happen in post thread, but the d'tor
     // of PostWorker can happen in a different thread.
     if (!surfaceGl->bindContext()) {
-        ERR("Failed to bind to post worker context.");
+        GFXSTREAM_ERROR("Failed to bind to post worker context.");
         return;
     }
     mContextBound = true;

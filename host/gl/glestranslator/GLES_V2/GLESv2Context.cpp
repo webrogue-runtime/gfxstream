@@ -20,10 +20,9 @@
 #include "SamplerData.h"
 #include "ShaderParser.h"
 #include "TransformFeedbackData.h"
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/files/StreamSerializing.h"
-
-#include "host-common/crash_reporter.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/host/stream_utils.h"
+#include "gfxstream/common/logging.h"
 
 #include <string.h>
 
@@ -65,7 +64,7 @@ void GLESv2Context::initGlobal(EGLiface* iface) {
 }
 
 void GLESv2Context::init(bool nativeTextureDecompressionEnabled, bool programBinaryLinkStatusEnabled) {
-    android::base::AutoLock mutex(s_lock);
+    gfxstream::base::AutoLock mutex(s_lock);
     if(!m_initialized) {
         GLEScontext::init(nativeTextureDecompressionEnabled, programBinaryLinkStatusEnabled);
         addVertexArrayObject(0);
@@ -153,7 +152,7 @@ void GLESv2Context::initEmulatedBuffers() {
 }
 
 GLESv2Context::GLESv2Context(int maj, int min, GlobalNameSpace* globalNameSpace,
-        android::base::Stream* stream, GlLibrary* glLib)
+        gfxstream::Stream* stream, GlLibrary* glLib)
         : GLEScontext(globalNameSpace, stream, glLib) {
     if (stream) {
         assert(maj == m_glesMajorVersion);
@@ -167,8 +166,8 @@ GLESv2Context::GLESv2Context(int maj, int min, GlobalNameSpace* globalNameSpace,
         }
         m_att0NeedsDisable = stream->getByte();
         m_useProgram = stream->getBe32();
-        android::base::loadCollection(stream, &m_bindSampler,
-                [](android::base::Stream* stream) {
+        gfxstream::loadCollection(stream, &m_bindSampler,
+                [](gfxstream::Stream* stream) {
                     GLuint idx = stream->getBe32();
                     GLuint val = stream->getBe32();
                     return std::make_pair(idx, val);
@@ -179,7 +178,7 @@ GLESv2Context::GLESv2Context(int maj, int min, GlobalNameSpace* globalNameSpace,
     }
     ObjectData::loadObject_t loader = [this](NamedObjectType type,
                                              long long unsigned int localName,
-                                             android::base::Stream* stream) {
+                                             gfxstream::Stream* stream) {
         return loadObject(type, localName, stream);
     };
     m_transformFeedbackNameSpace =
@@ -202,7 +201,7 @@ GLESv2Context::~GLESv2Context() {
     delete m_transformFeedbackNameSpace;
 }
 
-void GLESv2Context::onSave(android::base::Stream* stream) const {
+void GLESv2Context::onSave(gfxstream::Stream* stream) const {
     GLEScontext::onSave(stream);
     stream->write(m_attribute0value, sizeof(m_attribute0value));
     stream->putByte(m_attribute0valueChanged);
@@ -210,8 +209,8 @@ void GLESv2Context::onSave(android::base::Stream* stream) const {
     stream->write(m_att0Array.get(), sizeof(GLfloat) * 4 * m_att0ArrayLength);
     stream->putByte(m_att0NeedsDisable);
     stream->putBe32(m_useProgram);
-    android::base::saveCollection(stream, m_bindSampler,
-            [](android::base::Stream* stream,
+    gfxstream::saveCollection(stream, m_bindSampler,
+            [](gfxstream::Stream* stream,
                 const std::pair<const GLenum, GLuint>& item) {
                 stream->putBe32(item.first);
                 stream->putBe32(item.second);
@@ -405,7 +404,7 @@ void GLESv2Context::postLoadRestoreCtx() {
 }
 
 ObjectDataPtr GLESv2Context::loadObject(NamedObjectType type,
-            ObjectLocalName localName, android::base::Stream* stream) const {
+            ObjectLocalName localName, gfxstream::Stream* stream) const {
     switch (type) {
         case NamedObjectType::VERTEXBUFFER:
         case NamedObjectType::TEXTURE:
@@ -609,8 +608,8 @@ void GLESv2Context::drawWithEmulations(
             s_glDispatch.glDrawArraysInstanced(mode, first, count, primcount);
             break;
         default:
-            emugl::emugl_crash_reporter(
-                "drawWithEmulations has corrupt call parameters!");
+            GFXSTREAM_FATAL("drawWithEmulations has corrupt call parameters!");
+            break;
     }
 
     if (needClientIBOSetup) {

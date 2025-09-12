@@ -19,8 +19,7 @@
 #include "DisplaySurfaceGl.h"
 #include "OpenGLESDispatch/DispatchTables.h"
 #include "TextureDraw.h"
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/misc.h"
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 namespace gl {
@@ -32,8 +31,7 @@ const BorrowedImageInfoGl* getInfoOrAbort(const std::unique_ptr<BorrowedImageInf
         return imageGl;
     }
 
-    GFXSTREAM_ABORT(emugl::FatalError(emugl::ABORT_REASON_OTHER))
-        << "CompositorGl did not find BorrowedImageInfoGl";
+    GFXSTREAM_FATAL("CompositorGl did not find BorrowedImageInfoGl");
     return nullptr;
 }
 

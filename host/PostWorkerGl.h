@@ -18,10 +18,10 @@
 #include <future>
 #include <optional>
 
-#include "DisplaySurfaceUser.h"
+#include "gfxstream/host/display_surface_user.h"
 #include "PostWorker.h"
-#include "gl/DisplayGl.h"
-#include "gl/EmulationGl.h"
+#include "DisplayGl.h"
+#include "EmulationGl.h"
 
 namespace gfxstream {
 
@@ -36,9 +36,6 @@ class PostWorkerGl : public PostWorker, public DisplaySurfaceUser {
    public:
     PostWorkerGl(bool mainThreadPostingOnly, FrameBuffer* fb, Compositor* compositor,
                  gl::DisplayGl* displayGl, gl::EmulationGl* emulationGl);
-
-    void screenshot(ColorBuffer* cb, int screenwidth, int screenheight, GLenum format, GLenum type,
-                    int skinRotation, void* pixels, Rect rect) override;
 
    protected:
     std::shared_future<void> postImpl(ColorBuffer* cb) override;

@@ -1,3 +1,17 @@
+// Copyright 2025 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either expresso or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #ifndef COMPOSITOR_VK_H
 #define COMPOSITOR_VK_H
 
@@ -12,15 +26,15 @@
 #include <unordered_map>
 #include <vector>
 
-#include "BorrowedImage.h"
+#include "gfxstream/host/borrowed_image.h"
 #include "BorrowedImageVk.h"
 #include "Compositor.h"
 #include "DebugUtilsHelper.h"
 #include "Hwc2.h"
-#include "aemu/base/LruCache.h"
-#include "aemu/base/synchronization/Lock.h"
+#include "gfxstream/LruCache.h"
+#include "gfxstream/synchronization/Lock.h"
 #include "goldfish_vk_dispatch.h"
-#include "vulkan/vk_util.h"
+#include "vulkan/VkUtils.h"
 
 namespace gfxstream {
 namespace vk {
@@ -43,7 +57,7 @@ struct CompositorVkBase : public vk_util::MultiCrtp<CompositorVkBase,         //
     const VkQueue m_vkQueue;
     const uint32_t m_queueFamilyIndex;
     const DebugUtilsHelper m_debugUtilsHelper;
-    std::shared_ptr<android::base::Lock> m_vkQueueLock;
+    std::shared_ptr<gfxstream::base::Lock> m_vkQueueLock;
     VkDescriptorSetLayout m_vkDescriptorSetLayout;
     VkPipelineLayout m_vkPipelineLayout;
     struct PerFormatResources {
@@ -86,6 +100,7 @@ struct CompositorVkBase : public vk_util::MultiCrtp<CompositorVkBase,         //
     struct UniformBufferBinding {
         alignas(16) glm::mat4 positionTransform;
         alignas(16) glm::mat4 texCoordTransform;
+        alignas(16) glm::mat4 colorTransform;
         alignas(16) glm::uvec4 mode;
         alignas(16) glm::vec4 alpha;
         alignas(16) glm::vec4 color;
@@ -121,7 +136,7 @@ struct CompositorVkBase : public vk_util::MultiCrtp<CompositorVkBase,         //
 
     explicit CompositorVkBase(const VulkanDispatch& vk, VkDevice device,
                               VkPhysicalDevice physicalDevice, VkQueue queue,
-                              std::shared_ptr<android::base::Lock> queueLock,
+                              std::shared_ptr<gfxstream::base::Lock> queueLock,
                               uint32_t queueFamilyIndex, uint32_t maxFramesInFlight,
                               DebugUtilsHelper debugUtils)
         : m_vk(vk),
@@ -147,7 +162,7 @@ class CompositorVk : protected CompositorVkBase, public Compositor {
    public:
     static std::unique_ptr<CompositorVk> create(
         const VulkanDispatch& vk, VkDevice vkDevice, VkPhysicalDevice vkPhysicalDevice,
-        VkQueue vkQueue, std::shared_ptr<android::base::Lock> queueLock, uint32_t queueFamilyIndex,
+        VkQueue vkQueue, std::shared_ptr<gfxstream::base::Lock> queueLock, uint32_t queueFamilyIndex,
         uint32_t maxFramesInFlight,
         DebugUtilsHelper debugUtils = DebugUtilsHelper::withUtilsDisabled());
 
@@ -163,7 +178,7 @@ class CompositorVk : protected CompositorVkBase, public Compositor {
 
    private:
     explicit CompositorVk(const VulkanDispatch&, VkDevice, VkPhysicalDevice, VkQueue,
-                          std::shared_ptr<android::base::Lock> queueLock, uint32_t queueFamilyIndex,
+                          std::shared_ptr<gfxstream::base::Lock> queueLock, uint32_t queueFamilyIndex,
                           uint32_t maxFramesInFlight, DebugUtilsHelper debugUtils);
 
     void setUpGraphicsPipeline();
@@ -251,7 +266,7 @@ class CompositorVk : protected CompositorVkBase, public Compositor {
     static constexpr const VkFormat k_renderTargetFormat = VK_FORMAT_R8G8B8A8_UNORM;
     static constexpr const uint32_t k_renderTargetCacheSize = 128;
     // Maps from borrowed image ids to render target info.
-    android::base::LruCache<uint32_t, std::unique_ptr<RenderTarget>> m_renderTargetCache;
+    gfxstream::base::LruCache<uint32_t, std::unique_ptr<RenderTarget>> m_renderTargetCache;
 };
 
 }  // namespace vk

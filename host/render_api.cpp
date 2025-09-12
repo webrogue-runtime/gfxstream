@@ -18,11 +18,11 @@
 #include <memory>
 
 #include "RenderLibImpl.h"
-#include "host-common/logging.h"
+#include "gfxstream/common/logging.h"
 
 namespace gfxstream {
 
-RENDER_APICALL RenderLibPtr RENDER_APIENTRY initLibrary() {
+RENDER_API_EXPORT RenderLibPtr initLibrary() {
     return RenderLibPtr(new RenderLibImpl());
 }
 

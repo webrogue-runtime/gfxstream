@@ -14,8 +14,8 @@
 
 #include <gtest/gtest.h>
 
-#include "GLTestUtils.h"
-#include "OpenGLTestContext.h"
+#include "gfxstream/host/testing/GLTestUtils.h"
+#include "gfxstream/host/testing/OpenGLTestContext.h"
 #include "TextureDraw.h"
 
 namespace gfxstream {
@@ -73,7 +73,7 @@ void TestTextureDrawBasic(const GLESv2Dispatch* gl, GLenum internalformat,
 
     TextureDraw textureDraw;
 
-    textureDraw.draw(textureToDraw, 0, 0, 0);
+    textureDraw.draw(textureToDraw, 0, 0, 0, nullptr);
 
     std::vector<unsigned char> pixelsOut(bytes, 0xff);
 

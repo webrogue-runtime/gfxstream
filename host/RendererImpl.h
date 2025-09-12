@@ -14,19 +14,15 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "RenderThread.h"
 #include "RenderWindow.h"
-#include "aemu/base/Compiler.h"
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/synchronization/MessageChannel.h"
-#include "aemu/base/threads/FunctorThread.h"
 #include "gfxstream/host/Features.h"
 #include "render-utils/Renderer.h"
-#include "snapshot/common.h"
 
 namespace android_studio {
     class EmulatorGLESUsages;
@@ -39,26 +35,22 @@ public:
     RendererImpl();
     ~RendererImpl();
 
-    bool initialize(int width, int height, gfxstream::host::FeatureSet features, bool useSubWindow,
-                    bool egl2egl);
+    bool initialize(int width, int height, const gfxstream::host::FeatureSet& features, bool useSubWindow);
     void stop(bool wait) override;
     void finish() override;
 
 public:
     RenderChannelPtr createRenderChannel(
-        android::base::Stream* loadStream, uint32_t virtioGpuContextId) final;
+        gfxstream::Stream* loadStream, uint32_t virtioGpuContextId) final;
 
     void* addressSpaceGraphicsConsumerCreate(
-        struct asg_context,
-        android::base::Stream* stream,
-        android::emulation::asg::ConsumerCallbacks,
-        uint32_t contextId, uint32_t capsetId,
-        std::optional<std::string> name) override final;
+        const AsgConsumerCreateInfo& info, gfxstream::Stream* stream) override final;
     void addressSpaceGraphicsConsumerDestroy(void*) override final;
     void addressSpaceGraphicsConsumerPreSave(void* consumer) override final;
-    void addressSpaceGraphicsConsumerSave(void* consumer, android::base::Stream* stream) override final;
+    void addressSpaceGraphicsConsumerSave(void* consumer, gfxstream::Stream* stream) override final;
     void addressSpaceGraphicsConsumerPostSave(void* consumer) override final;
     void addressSpaceGraphicsConsumerRegisterPostLoadRenderThread(void* consumer) override final;
+    void addressSpaceGraphicsConsumerReloadRingConfig(void* consumer) override final;
 
     HardwareStrings getHardwareStrings() final;
     void setPostCallback(OnPostCallback onPost,
@@ -87,7 +79,7 @@ public:
     bool hasGuestPostedAFrame() final;
     void resetGuestPostedAFrame() final;
 
-    void setScreenMask(int width, int height, const unsigned char* rgbaData) final;
+    void setScreenMask(int width, int height, const uint8_t* rgbaData) final;
     void setMultiDisplay(uint32_t id,
                          int32_t x,
                          int32_t y,
@@ -105,18 +97,17 @@ public:
     void pauseAllPreSave() final;
     void resumeAll() final;
 
-    void save(android::base::Stream* stream,
-              const android::snapshot::ITextureSaverPtr& textureSaver) final;
-    bool load(android::base::Stream* stream,
-              const android::snapshot::ITextureLoaderPtr& textureLoader) final;
+    void save(gfxstream::Stream* stream,
+              const ITextureSaverPtr& textureSaver) final;
+    bool load(gfxstream::Stream* stream,
+              const ITextureLoaderPtr& textureLoader) final;
     void fillGLESUsages(android_studio::EmulatorGLESUsages*) final;
     int getScreenshot(unsigned int nChannels, unsigned int* width, unsigned int* height,
                       uint8_t* pixels, size_t* cPixels, int displayId, int desiredWidth,
                       int desiredHeight, int desiredRotation, Rect rect) final;
 
-    void snapshotOperationCallback(
-            int snapshotterOp,
-            int snapshotterStage) final;
+    void preLoad() override;
+    void postLoad() override;
 
     void addListener(FrameBufferChangeEventListener* listener) override;
     void removeListener(FrameBufferChangeEventListener* listener) override;
@@ -128,6 +119,9 @@ public:
     const void* getEglDispatch() override;
     const void* getGles2Dispatch() override;
 
+    void setShouldSkipDraw(bool skip) override;
+    bool getShouldSkipDraw() const override;
+
 private:
     DISALLOW_COPY_ASSIGN_AND_MOVE(RendererImpl);
 
@@ -138,8 +132,7 @@ private:
 
     std::unique_ptr<RenderWindow> mRenderWindow;
 
-    android::base::Lock mChannelsLock;
-
+    std::mutex mChannelsMutex;
     std::vector<std::shared_ptr<RenderChannelImpl>> mChannels;
     std::vector<std::shared_ptr<RenderChannelImpl>> mStoppedChannels;
     bool mStopped = false;
@@ -151,7 +144,7 @@ private:
 
     std::vector<RenderThread*> mAdditionalPostLoadRenderThreads;
 
-    android::base::Lock mAddressSpaceRenderThreadLock;
+    std::mutex mAddressSpaceRenderThreadMutex;
     std::unordered_set<RenderThread*> mAddressSpaceRenderThreads;
 };
 

@@ -16,13 +16,13 @@
 
 #include "VkDecoderGlobalState.h"
 #include "VulkanDispatch.h"
-#include "aemu/base/BumpPool.h"
-#include "base/include/aemu/base/HealthMonitor.h"
-#include "base/include/aemu/base/Metrics.h"
+#include "gfxstream/BumpPool.h"
+#include "gfxstream/HealthMonitor.h"
+#include "gfxstream/Metrics.h"
+#include "gfxstream/host/GfxApiLogger.h"
 #include "vulkan/VkCommonOperations.h"
 #include "vulkan/VkDecoderContext.h"
 #include "vulkan/testing/VkDecoderTestDispatch.h"
-#include "utils/include/utils/GfxApiLogger.h"
 
 namespace gfxstream {
 namespace vk {
@@ -99,11 +99,9 @@ class VulkanTestHelper {
     static std::mutex mMutex;  // Locked for the entire lifetime of this class.
     std::lock_guard<std::mutex> mLock;
     VulkanDispatch* mVk;
-    emugl::GfxApiLogger mLogger;
-    std::unique_ptr<android::base::MetricsLogger> mMetricsLogger;
-    emugl::HealthMonitor<> mHealthMonitor;
+    gfxstream::host::GfxApiLogger mLogger;
     std::unique_ptr<VkEmulation> mVkEmu;
-    std::unique_ptr<::android::base::BumpPool> mBp;
+    std::unique_ptr<::gfxstream::base::BumpPool> mBp;
     VkDecoderContext mDecoderContext;
     VkDecoderTestDispatch mTestDispatch;
     bool mFailOnValidationErrors = true;

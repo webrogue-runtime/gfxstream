@@ -18,36 +18,30 @@
 
 #include "FrameBuffer.h"
 #include "GrallocDefs.h"
-#include "SyncThread.h"
 #include "VkCommonOperations.h"
+#include "VkFormatUtils.h"
 #include "VulkanDispatch.h"
 #include "cereal/common/goldfish_vk_deepcopy.h"
 #include "cereal/common/goldfish_vk_extension_structs.h"
 #include "gfxstream/host/BackendCallbacks.h"
 #include "gfxstream/host/Tracing.h"
 #include "goldfish_vk_private_defs.h"
-#include "host-common/GfxstreamFatalError.h"
 #include "vulkan/vk_enum_string_helper.h"
 
 namespace gfxstream {
 namespace vk {
 
-#define VK_ANB_ERR(fmt, ...) ERR(fmt, ##__VA_ARGS__);
+#define VK_ANB_ERR(fmt, ...) GFXSTREAM_ERROR(fmt, ##__VA_ARGS__);
 
 #define ENABLE_VK_ANB_DEBUG 0
 
 #if ENABLE_VK_ANB_DEBUG
-#define VK_ANB_DEBUG(fmt, ...) \
-    INFO("vk-anb-debug: " fmt, ##__VA_ARGS__);
-#define VK_ANB_DEBUG_OBJ(obj, fmt, ...) \
-    INFO("vk-anb-debug: %p " fmt, obj, ##__VA_ARGS__);
+#define VK_ANB_DEBUG(fmt, ...) GFXSTREAM_INFO("vk-anb-debug: " fmt, ##__VA_ARGS__);
+#define VK_ANB_DEBUG_OBJ(obj, fmt, ...) GFXSTREAM_INFO("vk-anb-debug: %p " fmt, obj, ##__VA_ARGS__);
 #else
 #define VK_ANB_DEBUG(fmt, ...)
 #define VK_ANB_DEBUG_OBJ(obj, fmt, ...)
 #endif
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
 
 AndroidNativeBufferInfo::QsriWaitFencePool::QsriWaitFencePool(VulkanDispatch* vk, VkDevice device)
     : mVk(vk), mDevice(device) {}
@@ -69,8 +63,8 @@ VkFence AndroidNativeBufferInfo::QsriWaitFencePool::getFenceFromPool() {
         mAvailableFences.pop_back();
         VkResult res = mVk->vkResetFences(mDevice, 1, &fence);
         if (res != VK_SUCCESS) {
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                << "Fail to reset Qsri VkFence: " << res << "(" << string_VkResult(res) << ").";
+            const std::string resString = string_VkResult(res);
+            GFXSTREAM_FATAL("Failed to reset QSRI VkFence: %s", resString.c_str());
         }
         VK_ANB_DEBUG("existing fence in pool: %p. also reset the fence", fence);
     }
@@ -96,8 +90,7 @@ AndroidNativeBufferInfo::QsriWaitFencePool::~QsriWaitFencePool() {
 void AndroidNativeBufferInfo::QsriWaitFencePool::returnFence(VkFence fence) {
     std::lock_guard<std::mutex> lock(mMutex);
     if (!mUsedFences.erase(fence)) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "Return an unmanaged Qsri VkFence back to the pool.";
+        GFXSTREAM_FATAL("Return an unmanaged Qsri VkFence back to the pool.");
         return;
     }
     mAvailableFences.push_back(fence);
@@ -117,7 +110,7 @@ bool parseAndroidNativeBufferInfo(const VkImageCreateInfo* pCreateInfo,
 /*static*/
 std::unique_ptr<AndroidNativeBufferInfo> AndroidNativeBufferInfo::create(
     VkEmulation* emu,
-    VulkanDispatch* vk, VkDevice device, android::base::BumpPool& allocator,
+    VulkanDispatch* vk, VkDevice device, gfxstream::base::BumpPool& allocator,
     const VkImageCreateInfo* pCreateInfo, const VkNativeBufferANDROID* nativeBufferANDROID,
     const VkAllocationCallbacks* pAllocator, const VkPhysicalDeviceMemoryProperties* memProps) {
     bool colorBufferExportedToGl = false;
@@ -161,9 +154,9 @@ std::unique_ptr<AndroidNativeBufferInfo> AndroidNativeBufferInfo::create(
 
         auto* nativeBufferAndroid = vk_find_struct<VkNativeBufferANDROID>(&createImageCi);
         if (!nativeBufferAndroid) {
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                << "VkNativeBufferANDROID is required to be included in the pNext chain of the "
-                   "VkImageCreateInfo when importing a gralloc buffer.";
+            GFXSTREAM_FATAL(
+                "VkNativeBufferANDROID is required to be included in the pNext chain of the "
+                "VkImageCreateInfo when importing a gralloc buffer.");
         }
         vk_struct_chain_remove(nativeBufferAndroid, &createImageCi);
 
@@ -213,8 +206,7 @@ std::unique_ptr<AndroidNativeBufferInfo> AndroidNativeBufferInfo::create(
         vk_struct_chain_remove(bindSwapchainInfo, &createImageCi);
 
         if (vk_find_struct<VkExternalMemoryImageCreateInfo>(&createImageCi)) {
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                << "Unhandled VkExternalMemoryImageCreateInfo in the pNext chain.";
+            GFXSTREAM_FATAL("Unhandled VkExternalMemoryImageCreateInfo in the pNext chain.");
         }
 
         // Create the image with extension structure about external backing.
@@ -224,7 +216,7 @@ std::unique_ptr<AndroidNativeBufferInfo> AndroidNativeBufferInfo::create(
             static_cast<VkExternalMemoryHandleTypeFlags>(emu->getDefaultExternalMemoryHandleType()),
         };
 #if defined(__APPLE__)
-        if (emu->supportsMoltenVk()) {
+        if (emu->supportsExternalMemoryMetal()) {
             // Change handle type requested to metal handle
             extImageCi.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT;
         }
@@ -371,7 +363,7 @@ std::unique_ptr<AndroidNativeBufferInfo> AndroidNativeBufferInfo::create(
 
         uint32_t stagingMemoryTypeIndex = -1;
         bool stagingIndexRes =
-            getStagingMemoryTypeIndex(vk, device, memProps, &stagingMemoryTypeIndex);
+            getStagingMemoryTypeIndex(vk, device, memProps, stagingMemoryRequirements, &stagingMemoryTypeIndex);
         if (!stagingIndexRes) {
             VK_ANB_ERR(
                 "VK_ANDROID_native_buffer: could not obtain "
@@ -410,6 +402,11 @@ std::unique_ptr<AndroidNativeBufferInfo> AndroidNativeBufferInfo::create(
             return nullptr;
         }
     }
+
+    emu->getDebugUtilsHelper().addDebugLabel(out->mStagingBuffer, "ANB_StagingBuffer:%d",
+                                             out->mColorBufferHandle);
+    emu->getDebugUtilsHelper().addDebugLabel(out->mStagingBufferMemory, "ANB_StagingMemory:%d",
+                                             out->mColorBufferHandle);
 
     out->mQsriWaitFencePool = std::make_unique<AndroidNativeBufferInfo::QsriWaitFencePool>(
         out->mDeviceDispatch, out->mDevice);
@@ -585,7 +582,7 @@ VkResult AndroidNativeBufferInfo::on_vkAcquireImageANDROID(VkEmulation* emu,
     }
 
     if (mLastUsedQueueFamilyIndex == INVALID_QUEUE_FAMILY_INDEX) {
-        ERR("AndroidNativeBufferInfo missing last used queue.");
+        GFXSTREAM_ERROR("AndroidNativeBufferInfo missing last used queue.");
         return VK_ERROR_INITIALIZATION_FAILED;
     }
 
@@ -854,7 +851,7 @@ VkResult AndroidNativeBufferInfo::on_vkQueueSignalReleaseImageANDROID(
                 VK_ANB_ERR("Timeout when waiting for the Qsri fence.");
                 break;
             default:
-                ERR("Failed to wait for QSRI fence: %s\n", string_VkResult(res));
+                GFXSTREAM_ERROR("Failed to wait for QSRI fence: %s\n", string_VkResult(res));
                 VK_CHECK(res);
         }
         VK_ANB_DEBUG_OBJ(this, "wait callback: wait for fence %p...(done)", qsriFence);
@@ -884,23 +881,15 @@ VkResult AndroidNativeBufferInfo::on_vkQueueSignalReleaseImageANDROID(
         vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate);
 
         // Copy to from staging buffer to color buffer
-        uint32_t bpp = 4; /* format always rgba8...not */
-        switch (mVkFormat) {
-            case VK_FORMAT_R5G6B5_UNORM_PACK16:
-                bpp = 2;
-                break;
-            case VK_FORMAT_R8G8B8_UNORM:
-                bpp = 3;
-                break;
-            default:
-            case VK_FORMAT_R8G8B8A8_UNORM:
-            case VK_FORMAT_B8G8R8A8_UNORM:
-                bpp = 4;
-                break;
-        }
         const void* bytes = mMappedStagingPtr;
-        const size_t bytesSize = bpp * mExtent.width * mExtent.height;
-        emu->getCallbacks().flushColorBufferFromBytes(mColorBufferHandle, bytes, bytesSize);
+        const uint32_t bytesPerPixel = getBytesPerPixel(mVkFormat);
+        if (bytesPerPixel == 0) {
+            GFXSTREAM_ERROR("%s: Cannot flush color buffer, unknown format: %s [%d]",
+                            string_VkFormat(mVkFormat), mVkFormat);
+        } else {
+            const size_t bytesSize = bytesPerPixel * mExtent.width * mExtent.height;
+            emu->getCallbacks().flushColorBufferFromBytes(mColorBufferHandle, bytes, bytesSize);
+        }
 
         mQsriTimeline->signalNextPresentAndPoll();
     }
@@ -911,15 +900,16 @@ VkResult AndroidNativeBufferInfo::on_vkQueueSignalReleaseImageANDROID(
 AsyncResult AndroidNativeBufferInfo::registerQsriCallback(VkImage image,
                                                           VkQsriTimeline::Callback callback) {
     if (!mDeviceDispatch) {
-        ERR("Attempted to register QSRI callback on VkImage:%p with uninitialized ANB info.",
+        GFXSTREAM_ERROR(
+            "Attempted to register QSRI callback on VkImage:%p with uninitialized ANB info.",
             image);
         return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
     }
 
     // Could be null or mismatched image, check later
     if (image != mImage) {
-        ERR("Attempted on register QSRI callback on VkImage:%p with wrong image %p.", image,
-            mImage);
+        GFXSTREAM_ERROR("Attempted on register QSRI callback on VkImage:%p with wrong image %p.",
+                        image, mImage);
         return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
     }
 

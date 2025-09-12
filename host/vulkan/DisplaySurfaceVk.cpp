@@ -14,21 +14,17 @@
 
 #include "DisplaySurfaceVk.h"
 
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/logging.h"
-#include "vk_util.h"
+#include "gfxstream/common/logging.h"
+#include "VkUtils.h"
 
 namespace gfxstream {
 namespace vk {
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
 
 std::unique_ptr<DisplaySurfaceVk> DisplaySurfaceVk::create(const VulkanDispatch& vk,
                                                            VkInstance instance,
                                                            FBNativeWindowType window) {
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-#ifdef _WIN32
+#ifdef VK_USE_PLATFORM_WIN32_KHR
     const VkWin32SurfaceCreateInfoKHR surfaceCi = {
         .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
         .pNext = nullptr,
@@ -37,13 +33,19 @@ std::unique_ptr<DisplaySurfaceVk> DisplaySurfaceVk::create(const VulkanDispatch&
         .hwnd = window,
     };
     VK_CHECK(vk.vkCreateWin32SurfaceKHR(instance, &surfaceCi, nullptr, &surface));
+#elif defined(VK_USE_PLATFORM_MACOS_MVK)
+    const VkMacOSSurfaceCreateInfoMVK surfaceCi = {
+        .sType = VK_STRUCTURE_TYPE_MACOS_SURFACE_CREATE_INFO_MVK,
+        .pNext = nullptr,
+        .flags = 0,
+        .pView = window,
+    };
+    VK_CHECK(vk.vkCreateMacOSSurfaceMVK(instance, &surfaceCi, nullptr, &surface));
 #else
-    GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-        << "Unimplemented.";
+    GFXSTREAM_FATAL("Unimplemented.");
 #endif
     if (surface == VK_NULL_HANDLE) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "No VkSurfaceKHR created?";
+        GFXSTREAM_FATAL("No VkSurfaceKHR created?");
     }
 
     return std::unique_ptr<DisplaySurfaceVk>(new DisplaySurfaceVk(vk, instance, surface));

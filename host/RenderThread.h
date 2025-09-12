@@ -13,44 +13,38 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-#pragma once
 
-#include "aemu/base/files/MemStream.h"
-#include "aemu/base/Optional.h"
-#include "host-common/address_space_graphics_types.h"
-#include "aemu/base/synchronization/ConditionVariable.h"
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/threads/Thread.h"
+#pragma once
 
 #include <atomic>
 #include <memory>
+#include <optional>
+
+#include "RingStream.h"
+#include "gfxstream/host/mem_stream.h"
+#include "gfxstream/synchronization/ConditionVariable.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/threads/Thread.h"
+#include "render-utils/address_space_graphics_types.h"
+#include "render-utils/stream.h"
 
 namespace gfxstream {
 
 class RenderChannelImpl;
-class RendererImpl;
-class ReadBuffer;
-class RingStream;
 
 // A class used to model a thread of the RenderServer. Each one of them
 // handles a single guest client / protocol byte stream.
-class RenderThread : public android::base::Thread {
-    using MemStream = android::base::MemStream;
+class RenderThread : public gfxstream::base::Thread {
+  public:
+    static constexpr uint32_t INVALID_CONTEXT_ID = std::numeric_limits<uint32_t>::max();\
 
-public:
-    static constexpr uint32_t INVALID_CONTEXT_ID = std::numeric_limits<uint32_t>::max();
     // Create a new RenderThread instance.
     RenderThread(RenderChannelImpl* channel,
-                 android::base::Stream* loadStream = nullptr,
+                 gfxstream::Stream* loadStream = nullptr,
                  uint32_t virtioGpuContextId = INVALID_CONTEXT_ID);
 
-    // Create a new RenderThread instance tied to the address space device.
-    RenderThread(
-        struct asg_context context,
-        android::base::Stream* loadStream,
-        android::emulation::asg::ConsumerCallbacks callbacks,
-        uint32_t contextId, uint32_t capsetId,
-        std::optional<std::string> nameOpt);
+    // Create a new RenderThread instance tied to the given address space device.
+    RenderThread(const AsgConsumerCreateInfo& info, Stream* loadStream);
     virtual ~RenderThread();
 
     // Returns true iff the thread has finished.
@@ -59,7 +53,7 @@ public:
 
     void pausePreSnapshot();
     void resume();
-    void save(android::base::Stream* stream);
+    void save(gfxstream::Stream* stream);
 
     // RenderThreads are blocked from exiting after finished to workaround driver bugs.
     // `sendExitSignal` allows us to control when we can allow the thread to exit to synchronize
@@ -67,7 +61,11 @@ public:
     // This must be called after RenderThread has finished (use `waitForFinished`), as a deadlock
     // can occur if vulkan commands are still processing.
     void sendExitSignal();
-private:
+
+    //
+    void addressSpaceGraphicsReloadRingConfig();
+
+  private:
     virtual intptr_t main();
     void setFinished();
     void waitForExitSignal();
@@ -95,9 +93,9 @@ private:
     bool loadSnapshot(const SnapshotObjects& objects);
     bool saveSnapshot(const SnapshotObjects& objects);
 
-    void waitForSnapshotCompletion(android::base::AutoLock* lock);
-    void loadImpl(android::base::AutoLock* lock, const SnapshotObjects& objects);
-    void saveImpl(android::base::AutoLock* lock, const SnapshotObjects& objects);
+    void waitForSnapshotCompletion(gfxstream::base::AutoLock* lock);
+    void loadImpl(gfxstream::base::AutoLock* lock, const SnapshotObjects& objects);
+    void saveImpl(gfxstream::base::AutoLock* lock, const SnapshotObjects& objects);
 
     bool isPausedForSnapshotLocked() const;
 
@@ -106,12 +104,12 @@ private:
 
     SnapshotState mState = SnapshotState::Empty;
     std::atomic<bool> mFinished { false };
-    android::base::Lock mLock;
-    android::base::ConditionVariable mSnapshotSignal;
-    android::base::ConditionVariable mFinishedSignal;
-    android::base::ConditionVariable mExitSignal;
+    gfxstream::base::Lock mLock;
+    gfxstream::base::ConditionVariable mSnapshotSignal;
+    gfxstream::base::ConditionVariable mFinishedSignal;
+    gfxstream::base::ConditionVariable mExitSignal;
     std::atomic<bool> mCanExit { false };
-    android::base::Optional<android::base::MemStream> mStream;
+    std::optional<MemStream> mStream;
 
     bool mRunInLimitedMode = false;
     uint32_t mContextId = 0;

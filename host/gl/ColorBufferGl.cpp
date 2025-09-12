@@ -19,6 +19,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <cmath>
+
 #include "BorrowedImageGl.h"
 #include "DebugGl.h"
 #include "GLcommon/GLutils.h"
@@ -28,14 +30,11 @@
 #include "TextureDraw.h"
 #include "TextureResize.h"
 #include "gl/YUVConverter.h"
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/opengl/misc.h"
+#include "gfxstream/host/renderer_operations.h"
 
 #define DEBUG_CB_FBO 0
 
-using android::base::ManagedDescriptor;
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
+using gfxstream::base::ManagedDescriptor;
 
 namespace gfxstream {
 namespace gl {
@@ -65,7 +64,7 @@ bool bindFbo(GLuint* fbo, GLuint tex, bool ensureTextureAttached) {
 #if DEBUG_CB_FBO
     GLenum status = s_gles2.glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE_OES) {
-        ERR("ColorBufferGl::bindFbo: FBO not complete: %#x\n", status);
+        GFXSTREAM_ERROR("ColorBufferGl::bindFbo: FBO not complete: %#x\n", status);
         s_gles2.glBindFramebuffer(GL_FRAMEBUFFER, 0);
         s_gles2.glDeleteFramebuffers(1, fbo);
         *fbo = 0;
@@ -80,7 +79,7 @@ void unbindFbo() {
     s_gles2.glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-}
+}  // namespace
 
 static GLenum sGetUnsizedColorBufferFormat(GLenum format) {
     switch (format) {
@@ -196,6 +195,12 @@ static bool sGetFormatParameters(GLint* internalFormat,
             *bytesPerPixel = 1;
             *sizedInternalFormat = GL_R8;
             return true;
+        case GL_R16_EXT:
+            *texFormat = GL_RED;
+            *pixelType = GL_UNSIGNED_SHORT;
+            *bytesPerPixel = 2;
+            *sizedInternalFormat = GL_R16_EXT;
+            return true;
         case GL_RG8:
         case GL_RG:
             *texFormat = GL_RG;
@@ -243,13 +248,11 @@ static bool sGetFormatParameters(GLint* internalFormat,
 }
 
 // static
-std::unique_ptr<ColorBufferGl> ColorBufferGl::create(EGLDisplay p_display, int p_width,
-                                                     int p_height, GLint p_internalFormat,
-                                                     FrameworkFormat p_frameworkFormat,
-                                                     HandleType hndl, ContextHelper* helper,
-                                                     TextureDraw* textureDraw,
-                                                     bool fastBlitSupported,
-                                                     const gfxstream::host::FeatureSet& features) {
+std::unique_ptr<ColorBufferGl> ColorBufferGl::create(
+    EGLDisplay p_display, int p_width, int p_height, GLint p_internalFormat,
+    FrameworkFormat p_frameworkFormat, HandleType hndl, ContextHelper* helper,
+    TextureDraw* textureDraw, bool fastBlitSupported, const gfxstream::host::FeatureSet& features,
+    PixelReadFormats& pixelReadFormats) {
     GLenum texFormat = 0;
     GLenum pixelType = GL_UNSIGNED_BYTE;
     int bytesPerPixel = 4;
@@ -259,15 +262,15 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::create(EGLDisplay p_display, int p
     if (!sGetFormatParameters(&p_internalFormat, &texFormat, &pixelType,
                               &bytesPerPixel, &p_sizedInternalFormat,
                               &isBlob)) {
-        ERR("ColorBufferGl::create invalid format 0x%x", p_internalFormat);
+        GFXSTREAM_ERROR("ColorBufferGl::create invalid format 0x%x", p_internalFormat);
         return nullptr;
     }
     const unsigned long bufsize = ((unsigned long)bytesPerPixel) * p_width
             * p_height;
 
     // This constructor is private, so std::make_unique can't be used.
-    std::unique_ptr<ColorBufferGl> cb{
-        new ColorBufferGl(p_display, hndl, p_width, p_height, helper, textureDraw)};
+    std::unique_ptr<ColorBufferGl> cb{new ColorBufferGl(p_display, hndl, p_width, p_height, helper,
+                                                        textureDraw, pixelReadFormats)};
     cb->m_internalFormat = p_internalFormat;
     cb->m_sizedInternalFormat = p_sizedInternalFormat;
     cb->m_format = texFormat;
@@ -340,7 +343,7 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::create(EGLDisplay p_display, int p
     }
 
     // desktop GL only: use GL_UNSIGNED_INT_8_8_8_8_REV for faster readback.
-    if (emugl::getRenderer() == SELECTED_RENDERER_HOST) {
+    if (get_gfxstream_renderer() == SELECTED_RENDERER_HOST) {
 #define GL_UNSIGNED_INT_8_8_8_8           0x8035
 #define GL_UNSIGNED_INT_8_8_8_8_REV       0x8367
         cb->m_asyncReadbackType = GL_UNSIGNED_INT_8_8_8_8_REV;
@@ -357,7 +360,8 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::create(EGLDisplay p_display, int p
                     s_egl.eglCreateImageKHR(p_display, s_egl.eglGetCurrentContext(),
                                             EGL_NATIVE_PIXMAP_KHR, nativePixmap, nullptr);
                 if (cb->m_eglImage == EGL_NO_IMAGE_KHR) {
-                    ERR("ColorBufferGl::create(): EGL_NATIVE_PIXMAP handle provided as external "
+                    GFXSTREAM_ERROR(
+                        "ColorBufferGl::create(): EGL_NATIVE_PIXMAP handle provided as external "
                         "resource info, but failed to import pixmap (nativePixmap=0x%x)",
                         nativePixmap);
                     return nullptr;
@@ -368,7 +372,7 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::create(EGLDisplay p_display, int p
                 EGLBoolean setInfoRes = s_egl.eglSetImageInfoANDROID(
                     p_display, cb->m_eglImage, cb->m_width, cb->m_height, cb->m_internalFormat);
                 if (EGL_TRUE != setInfoRes) {
-                    ERR("ColorBufferGl::create(): Failed to set image info");
+                    GFXSTREAM_ERROR("ColorBufferGl::create(): Failed to set image info");
                     return nullptr;
                 }
 
@@ -376,8 +380,8 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::create(EGLDisplay p_display, int p
                 s_gles2.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, (GLeglImageOES)cb->m_eglImage);
             } break;
             default:
-                ERR("ColorBufferGl::create -- external memory info was provided, but ",
-                    p_internalFormat);
+                GFXSTREAM_ERROR("ColorBufferGl::create -- external memory info was provided, but ",
+                                p_internalFormat);
                 return nullptr;
         }
     } else {
@@ -394,12 +398,14 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::create(EGLDisplay p_display, int p
 }
 
 ColorBufferGl::ColorBufferGl(EGLDisplay display, HandleType hndl, GLuint width, GLuint height,
-                             ContextHelper* helper, TextureDraw* textureDraw)
+                             ContextHelper* helper, TextureDraw* textureDraw,
+                             PixelReadFormats& pixelReadFormats)
     : m_width(width),
       m_height(height),
       m_display(display),
       m_helper(helper),
       m_textureDraw(textureDraw),
+      m_pixelReadFormats(pixelReadFormats),
       mHndl(hndl) {}
 
 ColorBufferGl::~ColorBufferGl() {
@@ -408,7 +414,7 @@ ColorBufferGl::~ColorBufferGl() {
     // b/284523053
     // Swiftshader logspam on exit. But it doesn't happen with SwANGLE.
     if (!context.isOk()) {
-        GL_LOG("Failed to bind context when releasing color buffers\n");
+        GFXSTREAM_DEBUG("Failed to bind context when releasing color buffers\n");
         return;
     }
 
@@ -443,15 +449,36 @@ ColorBufferGl::~ColorBufferGl() {
     delete m_resizer;
 }
 
-static void convertRgbaToRgbPixels(void* dst, const void* src, uint32_t w, uint32_t h) {
+
+static void convertRgbaToRgbPixels(void* dst, const void* src, uint32_t w, uint32_t h,
+                                   GLenum p_type) {
     const size_t pixelCount = w * h;
     const uint32_t* srcPixels = reinterpret_cast<const uint32_t*>(src);
-    uint8_t* dstBytes = reinterpret_cast<uint8_t*>(dst);
-    for (size_t i = 0; i < pixelCount; ++i) {
-        const uint32_t pixel = *(srcPixels++);
-        *(dstBytes++) = (pixel & 0xff);
-        *(dstBytes++) = ((pixel >> 8) & 0xff);
-        *(dstBytes++) = ((pixel >> 16) & 0xff);
+
+    if (p_type == GL_UNSIGNED_BYTE) {
+        uint8_t* dstBytes = reinterpret_cast<uint8_t*>(dst);
+        for (size_t i = 0; i < pixelCount; ++i) {
+            const uint32_t pixel = *(srcPixels++);
+            *(dstBytes++) = (pixel & 0xff);
+            *(dstBytes++) = ((pixel >> 8) & 0xff);
+            *(dstBytes++) = ((pixel >> 16) & 0xff);
+        }
+    } else if (p_type == GL_UNSIGNED_SHORT_5_6_5) {
+        // A8B8G8R8 TO R5G6B5
+        // Check validity with
+        // testBasicBufferImportAndRenderingExternalFormat[AHARDWAREBUFFER_FORMAT_R5G6B5_UNORM]
+        uint16_t* dstPixel = reinterpret_cast<uint16_t*>(dst);
+        for (size_t i = 0; i < pixelCount; ++i) {
+            const uint32_t pixel = *(srcPixels++);
+            // uint16_t r5 = (uint16_t)((pixel & 0xff) >> 3);
+            // uint16_t g6 = (uint16_t)(((pixel >> 8) & 0xff) >> 2);
+            // uint16_t b5 = (uint16_t) (((pixel >> 16) & 0xff) >> 3);
+            // *(dstPixel++) = (r5 << 11) | (g6 << 5) | b5;
+            *(dstPixel++) =
+                ((pixel & 0xf8) << 8) // r5 (upper 5-bits of r8 channel) shifted to upper bits 11-15
+                | ((pixel & 0xfc00) >> 5)  // g6 (upper 6-bits of g8 channel) shifted to bits 5-10
+                | ((pixel & 0xf80000) >> 19); // b5 (upper 5-bits of b8 channel) shifted to bits 0-4
+        }
     }
 }
 
@@ -469,25 +496,37 @@ bool ColorBufferGl::readPixels(int x, int y, int width, int height, GLenum p_for
 
     waitSync();
 
-    if (bindFbo(&m_fbo, m_tex, m_needFboReattach)) {
-        m_needFboReattach = false;
-        GLint prevAlignment = 0;
-        s_gles2.glGetIntegerv(GL_PACK_ALIGNMENT, &prevAlignment);
-        s_gles2.glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        if ((p_format == GL_RGB || p_format == GL_RGB8) && p_type == GL_UNSIGNED_BYTE) {
-            // GL_RGB reads fail with SwiftShader.
-            uint8_t* tmpPixels = new uint8_t[width * height * 4];
-            s_gles2.glReadPixels(x, y, width, height, GL_RGBA, p_type, tmpPixels);
-            convertRgbaToRgbPixels(pixels, tmpPixels, width, height);
-        } else {
-            s_gles2.glReadPixels(x, y, width, height, p_format, p_type, pixels);
-        }
-        s_gles2.glPixelStorei(GL_PACK_ALIGNMENT, prevAlignment);
-        unbindFbo();
-        return true;
+    if (!bindFbo(&m_fbo, m_tex, m_needFboReattach)) {
+        return false;
     }
 
-    return false;
+    m_needFboReattach = false;
+    GLint prevAlignment = 0;
+    bool res = true;
+    s_gles2.glGetIntegerv(GL_PACK_ALIGNMENT, &prevAlignment);
+    s_gles2.glPixelStorei(GL_PACK_ALIGNMENT, 1);
+
+    if (m_pixelReadFormats.isSupported(m_internalFormat, m_format, m_type, p_format, p_type)) {
+        s_gles2.glReadPixels(x, y, width, height, p_format, p_type, pixels);
+    } else {
+        // Software readback. All GL drivers support RGBA readback. We try our best here to
+        // support conversions from RGBA to some commonly requested formats.
+        if ((p_format == GL_RGB || p_format == GL_RGB8) &&
+            (p_type == GL_UNSIGNED_BYTE || p_type == GL_UNSIGNED_SHORT_5_6_5)) {
+            std::vector<uint8_t> tmpPixels(width * height * 4);
+            s_gles2.glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, tmpPixels.data());
+            convertRgbaToRgbPixels(pixels, tmpPixels.data(), width, height, p_type);
+        } else {
+            GFXSTREAM_ERROR(
+                "UNIMPLEMENTED: GLES driver doesn't support readback for "
+                "(format=0x%x type=0x%x) and no software conversion implemented.",
+                p_format, p_type);
+            res = false;
+        }
+    }
+    s_gles2.glPixelStorei(GL_PACK_ALIGNMENT, prevAlignment);
+    unbindFbo();
+    return res;
 }
 
 bool ColorBufferGl::readPixelsScaled(int width, int height, GLenum p_format, GLenum p_type,
@@ -501,7 +540,8 @@ bool ColorBufferGl::readPixelsScaled(int width, int height, GLenum p_format, GLe
     if (useSnipping &&
         (rect.pos.x < 0 || rect.pos.y < 0 || rect.pos.x + rect.size.w > width ||
          rect.pos.y + rect.size.h > height)) {
-        ERR("readPixelsScaled failed. Out-of-bound rectangle: (%d, %d) [%d x %d]"
+        GFXSTREAM_ERROR(
+            "readPixelsScaled failed. Out-of-bound rectangle: (%d, %d) [%d x %d]"
             " with screen [%d x %d]",
             rect.pos.x, rect.pos.y, rect.size.w, rect.size.h);
         return false;
@@ -520,8 +560,8 @@ bool ColorBufferGl::readPixelsScaled(int width, int height, GLenum p_format, GLe
         // other formats are optional.
         bool needConvert4To3Channel =
                 p_format == GL_RGB && p_type == GL_UNSIGNED_BYTE &&
-                (emugl::getRenderer() == SELECTED_RENDERER_SWIFTSHADER_INDIRECT ||
-                    emugl::getRenderer() == SELECTED_RENDERER_ANGLE_INDIRECT);
+                (get_gfxstream_renderer() == SELECTED_RENDERER_SWIFTSHADER_INDIRECT ||
+                    get_gfxstream_renderer() == SELECTED_RENDERER_ANGLE_INDIRECT);
         std::vector<uint8_t> tmpPixels;
         void* readPixelsDst = pixels;
         if (needConvert4To3Channel) {
@@ -565,6 +605,10 @@ bool ColorBufferGl::readPixelsYUVCached(int x, int y, int width, int height, voi
     }
 
     waitSync();
+
+    if (!m_yuv_converter) {
+        return false;
+    }
 
 #if DEBUG_CB_FBO
     fprintf(stderr, "%s %d request width %d height %d\n", __func__, __LINE__,
@@ -669,8 +713,8 @@ bool ColorBufferGl::subUpdateFromFrameworkFormat(int x, int y, int width, int he
     GL_SCOPED_DEBUG_GROUP("ColorBufferGl::subUpdate(handle:%d fbo:%d tex:%d)", mHndl, m_fbo, m_tex);
 
     if (m_needFormatCheck) {
-        if (p_type != m_type || p_format != m_format) {
-            reformat((GLint)p_format, p_type);
+        if (p_type != m_type || p_unsizedFormat != m_format) {
+            reformat((GLint)p_unsizedFormat, p_type);
         }
         m_needFormatCheck = false;
     }
@@ -728,8 +772,7 @@ bool ColorBufferGl::readContents(size_t* numBytes, void* pixels) {
 bool ColorBufferGl::blitFromCurrentReadBuffer() {
     RenderThreadInfoGl* const tInfo = RenderThreadInfoGl::get();
     if (!tInfo) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "Render thread GL not available.";
+        GFXSTREAM_FATAL("Render thread GL not available.");
     }
 
     if (!tInfo->currContext.get()) {
@@ -877,7 +920,7 @@ bool ColorBufferGl::blitFromCurrentReadBuffer() {
         s_gles2.glViewport(0, 0, m_width, m_height);
 
         // render m_blitTex
-        m_textureDraw->draw(m_blitTex, 0., 0, 0);
+        m_textureDraw->draw(m_blitTex, 0., 0, 0, nullptr);
 
         // Restore previous viewport.
         s_gles2.glViewport(vport[0], vport[1], vport[2], vport[3]);
@@ -894,8 +937,7 @@ bool ColorBufferGl::bindToTexture() {
 
     RenderThreadInfoGl* const tInfo = RenderThreadInfoGl::get();
     if (!tInfo) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "Render thread GL not available.";
+        GFXSTREAM_FATAL("Render thread GL not available.");
     }
 
     if (!tInfo->currContext.get()) {
@@ -926,8 +968,7 @@ bool ColorBufferGl::bindToRenderbuffer() {
 
     RenderThreadInfoGl* const tInfo = RenderThreadInfoGl::get();
     if (!tInfo) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "Render thread GL not available.";
+        GFXSTREAM_FATAL("Render thread GL not available.");
     }
 
     if (!tInfo->currContext.get()) {
@@ -958,16 +999,19 @@ void ColorBufferGl::waitSync(bool debug) {
     }
 }
 
-bool ColorBufferGl::post(GLuint tex, float rotation, float dx, float dy) {
+bool ColorBufferGl::post(GLuint tex, float rotation, float dx, float dy,
+                         const float* colorTransform) {
     // NOTE: Do not call m_helper->setupContext() here!
     waitSync();
-    return m_textureDraw->draw(tex, rotation, dx, dy);
+    return m_textureDraw->draw(tex, rotation, dx, dy, colorTransform);
 }
 
-bool ColorBufferGl::postViewportScaledWithOverlay(float rotation, float dx, float dy) {
+bool ColorBufferGl::postViewportScaledWithOverlay(float rotation, float dx, float dy,
+                                                  const float* colorTransform) {
     // NOTE: Do not call m_helper->setupContext() here!
     waitSync();
-    return m_textureDraw->drawWithOverlay(getViewportScaledTexture(), rotation, dx, dy);
+    return m_textureDraw->drawWithOverlay(getViewportScaledTexture(), rotation, dx, dy,
+                                          colorTransform);
 }
 
 void ColorBufferGl::readback(unsigned char* img, bool readbackBgra) {
@@ -1010,7 +1054,7 @@ void ColorBufferGl::readbackAsync(GLuint buffer, bool readbackBgra) {
 
 HandleType ColorBufferGl::getHndl() const { return mHndl; }
 
-void ColorBufferGl::onSave(android::base::Stream* stream) {
+void ColorBufferGl::onSave(gfxstream::Stream* stream) {
     stream->putBe32(getHndl());
     stream->putBe32(static_cast<uint32_t>(m_width));
     stream->putBe32(static_cast<uint32_t>(m_height));
@@ -1023,11 +1067,12 @@ void ColorBufferGl::onSave(android::base::Stream* stream) {
     stream->putBe32(m_needFormatCheck);
 }
 
-std::unique_ptr<ColorBufferGl> ColorBufferGl::onLoad(android::base::Stream* stream,
+std::unique_ptr<ColorBufferGl> ColorBufferGl::onLoad(gfxstream::Stream* stream,
                                                      EGLDisplay p_display, ContextHelper* helper,
                                                      TextureDraw* textureDraw,
                                                      bool fastBlitSupported,
-                                                     const gfxstream::host::FeatureSet& features) {
+                                                     const gfxstream::host::FeatureSet& features,
+                                                     PixelReadFormats& pixelReadFormats) {
     HandleType hndl = static_cast<HandleType>(stream->getBe32());
     GLuint width = static_cast<GLuint>(stream->getBe32());
     GLuint height = static_cast<GLuint>(stream->getBe32());
@@ -1039,11 +1084,11 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::onLoad(android::base::Stream* stre
     uint32_t needFormatCheck = stream->getBe32();
 
     if (!eglImage) {
-        return create(p_display, width, height, internalFormat, frameworkFormat,
-                      hndl, helper, textureDraw, fastBlitSupported, features);
+        return create(p_display, width, height, internalFormat, frameworkFormat, hndl, helper,
+                      textureDraw, fastBlitSupported, features, pixelReadFormats);
     }
     std::unique_ptr<ColorBufferGl> cb(
-        new ColorBufferGl(p_display, hndl, width, height, helper, textureDraw));
+        new ColorBufferGl(p_display, hndl, width, height, helper, textureDraw, pixelReadFormats));
     cb->m_eglImage = eglImage;
     cb->m_blitEGLImage = blitEGLImage;
     assert(eglImage && blitEGLImage);
@@ -1108,7 +1153,7 @@ bool ColorBufferGl::importMemory(ManagedDescriptor externalDescriptor, uint64_t 
     }
     std::optional<ManagedDescriptor::DescriptorType> maybeRawDescriptor = externalDescriptor.get();
     if (!maybeRawDescriptor.has_value()) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << "Uninitialized external descriptor.";
+        GFXSTREAM_FATAL("Uninitialized external descriptor.");
     }
     ManagedDescriptor::DescriptorType rawDescriptor = *maybeRawDescriptor;
 
@@ -1134,7 +1179,8 @@ bool ColorBufferGl::importMemory(ManagedDescriptor externalDescriptor, uint64_t 
         externalDescriptor.release();
 #endif
     } else {
-        ERR("Failed to import external memory object with error: %d", static_cast<int>(error));
+        GFXSTREAM_ERROR("Failed to import external memory object with error: %d",
+                        static_cast<int>(error));
         return false;
     }
 

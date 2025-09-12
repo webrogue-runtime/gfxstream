@@ -28,15 +28,17 @@
 #include "DebugUtilsHelper.h"
 #include "DeviceLostHelper.h"
 #include "DisplayVk.h"
-#include "ExternalObjectManager.h"
 #include "FrameworkFormats.h"
-#include "aemu/base/Optional.h"
-#include "aemu/base/ThreadAnnotations.h"
+#include "gfxstream/Optional.h"
+#include "gfxstream/ThreadAnnotations.h"
 #include "gfxstream/host/BackendCallbacks.h"
 #include "gfxstream/host/Features.h"
+#include "gfxstream/host/GfxApiLogger.h"
+#include "gfxstream/host/RenderDoc.h"
+#include "gfxstream/host/external_object_manager.h"
+#include "gfxstream/host/vk_enums.h"
+#include "gfxstream/memory/UdmabufCreator.h"
 #include "goldfish_vk_private_defs.h"
-#include "utils/GfxApiLogger.h"
-#include "utils/RenderDoc.h"
 
 #if defined(_WIN32)
 typedef void* HANDLE;
@@ -53,6 +55,8 @@ typedef int VK_EXT_SYNC_HANDLE;
 namespace gfxstream {
 namespace vk {
 
+using gfxstream::base::UdmabufCreator;
+
 struct VulkanDispatch;
 
 // Returns a consistent answer for which memory type index is best for staging
@@ -61,6 +65,7 @@ struct VulkanDispatch;
 // associated with it.
 bool getStagingMemoryTypeIndex(VulkanDispatch* vk, VkDevice device,
                                const VkPhysicalDeviceMemoryProperties* memProps,
+                               const VkMemoryRequirements& memReqs,
                                uint32_t* typeIndex);
 
 enum class AstcEmulationMode {
@@ -81,7 +86,7 @@ class VkEmulation {
 
     static std::unique_ptr<VkEmulation> create(VulkanDispatch* vk,
                                                gfxstream::host::BackendCallbacks callbacks,
-                                               gfxstream::host::FeatureSet features);
+                                               const gfxstream::host::FeatureSet& features);
 
     struct Features {
         bool glInteropSupported = false;
@@ -89,7 +94,7 @@ class VkEmulation {
         bool createResourceWithRequirements = false;
         bool useVulkanComposition = false;
         bool useVulkanNativeSwapchain = false;
-        std::unique_ptr<emugl::RenderDocWithMultipleVkInstances> guestRenderDoc = nullptr;
+        std::unique_ptr<gfxstream::host::RenderDocWithMultipleVkInstances> guestRenderDoc = nullptr;
         AstcEmulationMode astcLdrEmulationMode = AstcEmulationMode::Disabled;
         bool enableEtc2Emulation = false;
         bool enableYcbcrEmulation = false;
@@ -110,6 +115,7 @@ class VkEmulation {
     bool supportsExternalFenceCapabilities() const;
     bool supportsSurfaces() const;
     bool supportsMoltenVk() const;
+    bool supportsExternalMemoryMetal() const;
 
     bool supportsGetPhysicalDeviceProperties2() const;
 
@@ -148,11 +154,13 @@ class VkEmulation {
 
     AstcEmulationMode getAstcLdrEmulationMode() const;
 
-    emugl::RenderDocWithMultipleVkInstances* getRenderDoc();
+    gfxstream::host::RenderDocWithMultipleVkInstances* getRenderDoc();
 
     Compositor* getCompositor();
 
     DisplayVk* getDisplay();
+
+    UdmabufCreator* getUdmabufCreator();
 
     VkInstance getInstance();
 
@@ -164,17 +172,8 @@ class VkEmulation {
 
     const VkPhysicalDeviceProperties getPhysicalDeviceProperties() const;
 
-    struct RepresentativeColorBufferMemoryTypeInfo {
-        // The host memory type index used for Buffer/ColorBuffer allocations.
-        uint32_t hostMemoryTypeIndex;
-
-        // The guest memory type index that will be returned to guest processes querying
-        // the memory type index of host AHardwareBuffer/ColorBuffer allocations. This may
-        // point to an emulated memory type so that the host can control which memory flags are
-        // exposed to the guest (i.e. hide VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT from the guest).
-        uint32_t guestMemoryTypeIndex;
-    };
-    RepresentativeColorBufferMemoryTypeInfo getRepresentativeColorBufferMemoryTypeInfo() const;
+    host::RepresentativeColorBufferMemoryTypeInfo getRepresentativeColorBufferMemoryTypeInfo()
+        const;
 
     void onVkDeviceLost();
 
@@ -196,13 +195,14 @@ class VkEmulation {
     std::unique_ptr<VkImageCreateInfo> generateColorBufferVkImageCreateInfo(VkFormat format,
                                                                             uint32_t width,
                                                                             uint32_t height,
-                                                                            VkImageTiling tiling);
+                                                                            VkImageTiling tiling,
+                                                                            uint32_t mipLevels);
 
     bool isFormatSupported(GLenum format);
 
     bool createVkColorBuffer(uint32_t width, uint32_t height, GLenum format,
                              FrameworkFormat frameworkFormat, uint32_t colorBufferHandle,
-                             bool vulkanOnly, uint32_t memoryProperty);
+                             bool vulkanOnly, uint32_t memoryProperty, uint32_t mipLevels);
 
     bool teardownVkColorBuffer(uint32_t colorBufferHandle);
 
@@ -239,10 +239,10 @@ class VkEmulation {
     };
 
     bool allocExternalMemory(
-        VulkanDispatch* vk, ExternalMemoryInfo* info, bool actuallyExternal = true,
-        android::base::Optional<uint64_t> deviceAlignment = android::base::kNullopt,
-        android::base::Optional<VkBuffer> bufferForDedicatedAllocation = android::base::kNullopt,
-        android::base::Optional<VkImage> imageForDedicatedAllocation = android::base::kNullopt);
+        VulkanDispatch* vk, ExternalMemoryInfo* info,
+        gfxstream::base::Optional<uint64_t> deviceAlignment = gfxstream::base::kNullopt,
+        gfxstream::base::Optional<VkBuffer> bufferForDedicatedAllocation = gfxstream::base::kNullopt,
+        gfxstream::base::Optional<VkImage> imageForDedicatedAllocation = gfxstream::base::kNullopt);
 
     bool importExternalMemory(VulkanDispatch* vk, VkDevice targetDevice,
                               const ExternalMemoryInfo* info,
@@ -367,7 +367,6 @@ class VkEmulation {
                        uint32_t memoryProperty = 0);
     bool teardownVkBuffer(uint32_t bufferHandle);
 
-    std::optional<GenericDescriptorInfo> exportMemoryHandle(VkDevice device, VkDeviceMemory memory);
     std::optional<ExternalHandleInfo> dupBufferExtMemoryHandle(uint32_t bufferHandle);
 #ifdef __APPLE__
     MTLResource_id getBufferMetalMemoryHandle(uint32_t bufferHandle);
@@ -404,7 +403,7 @@ class VkEmulation {
    private:
     VkEmulation() = default;
 
-    std::optional<RepresentativeColorBufferMemoryTypeInfo>
+    std::optional<host::RepresentativeColorBufferMemoryTypeInfo>
     findRepresentativeColorBufferMemoryTypeIndexLocked() REQUIRES(mMutex);
 
     struct ImageSupportInfo {
@@ -471,6 +470,8 @@ class VkEmulation {
 
 #ifdef _WIN32
         PFN_vkGetMemoryWin32HandleKHR getMemoryHandleFunc = nullptr;
+#elif defined(__ANDROID__)
+        PFN_vkGetMemoryAndroidHardwareBufferANDROID getMemoryHandleFunc = nullptr;
 #else
         PFN_vkGetMemoryFdKHR getMemoryHandleFunc = nullptr;
 #endif
@@ -488,14 +489,17 @@ class VkEmulation {
 
     bool getColorBufferAllocationInfoLocked(uint32_t colorBufferHandle, VkDeviceSize* outSize,
                                             uint32_t* outMemoryTypeIndex,
-                                            bool* outMemoryIsDedicatedAlloc, void** outMappedPtr) REQUIRES(mMutex);
+                                            bool* outMemoryIsDedicatedAlloc, void** outMappedPtr)
+        REQUIRES(mMutex);
 
     std::unique_ptr<VkImageCreateInfo> generateColorBufferVkImageCreateInfoLocked(
-        VkFormat format, uint32_t width, uint32_t height, VkImageTiling tiling) REQUIRES(mMutex);
+        VkFormat format, uint32_t width, uint32_t height, VkImageTiling tiling, uint32_t mipLevels)
+        REQUIRES(mMutex);
 
     bool createVkColorBufferLocked(uint32_t width, uint32_t height, GLenum internalFormat,
                                    FrameworkFormat frameworkFormat, uint32_t colorBufferHandle,
-                                   bool vulkanOnly, uint32_t memoryProperty) REQUIRES(mMutex);
+                                   bool vulkanOnly, uint32_t memoryProperty, uint32_t mipLevels)
+        REQUIRES(mMutex);
 
     bool teardownVkColorBufferLocked(uint32_t colorBufferHandle) REQUIRES(mMutex);
 
@@ -522,7 +526,8 @@ class VkEmulation {
 
     gfxstream::host::FeatureSet mFeatures;
 
-    RepresentativeColorBufferMemoryTypeInfo mRepresentativeColorBufferMemoryTypeInfo;
+    gfxstream::host::RepresentativeColorBufferMemoryTypeInfo
+        mRepresentativeColorBufferMemoryTypeInfo;
 
     // Whether to use deferred command submission.
     bool mUseDeferredCommands = false;
@@ -531,7 +536,7 @@ class VkEmulation {
     bool mUseCreateResourcesWithRequirements = false;
 
     // RenderDoc integration for guest VkInstances.
-    std::unique_ptr<emugl::RenderDocWithMultipleVkInstances> mGuestRenderDoc;
+    std::unique_ptr<gfxstream::host::RenderDocWithMultipleVkInstances> mGuestRenderDoc;
 
     // Whether to use ASTC emulation. Our current ASTC decoder implementation may lead to device
     // lost on certain device on Windows.
@@ -572,8 +577,10 @@ class VkEmulation {
     bool mInstanceSupportsSurface = false;
 #if defined(__APPLE__)
     bool mInstanceSupportsMoltenVK = false;
+    bool mInstanceSupportsExternalMemoryMetal = false;
 #else
     static const bool mInstanceSupportsMoltenVK = false;
+    static const bool mInstanceSupportsExternalMemoryMetal = false;
 #endif
 
     PFN_vkGetPhysicalDeviceImageFormatProperties2KHR mGetImageFormatProperties2Func = nullptr;
@@ -590,7 +597,7 @@ class VkEmulation {
     // for running commands to sync stuff system-wide.
     // TODO(b/197362803): Encapsulate host side VkQueue and the lock.
     VkQueue mQueue = VK_NULL_HANDLE;
-    std::shared_ptr<android::base::Lock> mQueueLock = nullptr;
+    std::shared_ptr<gfxstream::base::Lock> mQueueLock = nullptr;
     uint32_t mQueueFamilyIndex = 0;
 
     VkCommandPool mCommandPool = VK_NULL_HANDLE;
@@ -603,22 +610,25 @@ class VkEmulation {
     // ought to be big enough for anybody!
     static constexpr VkDeviceSize kDefaultStagingBufferSize = 128ULL * 1048576ULL;
 
-    struct StagingBufferInfo {
-        // TODO: Don't actually use this as external memory until host visible
-        // external is supported on all platforms
-        ExternalMemoryInfo memory;
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceSize size = kDefaultStagingBufferSize;
+    struct StagingBuffer {
+        VkDeviceMemory mMemory = VK_NULL_HANDLE;
+        VkBuffer mBuffer = VK_NULL_HANDLE;
+        VkDeviceSize mAllocationSize;
+        void* mMappedPtr = nullptr;
+        bool mIsHostCoherent = false;
+
+        bool create(VulkanDispatch* vk, VkDevice device,
+            const VkPhysicalDeviceMemoryProperties* memProps,
+            const DebugUtilsHelper& debugUtilsHelper,
+            const VkDeviceSize size);
+        void destroy(VulkanDispatch* dvk, VkDevice device);
     };
 
     // Track what is supported on whatever device was selected.
     DeviceSupportInfo mDeviceInfo;
 
-    // A single staging buffer to perform most transfers to/from OpenGL on the
-    // host. It is shareable across instances. The memory is shareable but the
-    // buffer is not; other users need to create buffers that
-    // bind to imported versions of the memory.
-    StagingBufferInfo mStaging GUARDED_BY(mMutex);
+    // Staging buffer to perform reads and updates on color buffers.
+    StagingBuffer mStaging GUARDED_BY(mMutex);
 
     // ColorBuffers are intended to back the guest's shareable images.
     // For example:
@@ -665,6 +675,9 @@ class VkEmulation {
     // The implementation for Vulkan native swapchain. Only initialized in initVkEmulationFeatures
     // if useVulkanNativeSwapchain is set.
     std::unique_ptr<DisplayVk> mDisplayVk;
+
+    // UdmabufCreator
+    std::unique_ptr<UdmabufCreator> mUdmabufCreator;
 };
 
 }  // namespace vk

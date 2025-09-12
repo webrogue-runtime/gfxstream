@@ -1,19 +1,30 @@
+// Copyright 2025 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either expresso or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "DisplayVk.h"
 
 #include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtx/matrix_transform_2d.hpp>
 
-#include "host-common/GfxstreamFatalError.h"
-#include "host-common/logging.h"
+#include "gfxstream/common/logging.h"
 #include "vulkan/VkFormatUtils.h"
 #include "vulkan/vk_enum_string_helper.h"
 
 namespace gfxstream {
 namespace vk {
 
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
 using gfxstream::vk::formatIsDepthOrStencil;
 using gfxstream::vk::formatIsSInt;
 using gfxstream::vk::formatIsUInt;
@@ -23,7 +34,7 @@ using gfxstream::vk::formatRequiresSamplerYcbcrConversion;
     do {                                             \
         static bool displayVkInternalLogged = false; \
         if (!displayVkInternalLogged) {              \
-            ERR(fmt, ##__VA_ARGS__);                 \
+            GFXSTREAM_ERROR(fmt, ##__VA_ARGS__);     \
             displayVkInternalLogged = true;          \
         }                                            \
     } while (0)
@@ -49,9 +60,9 @@ bool shouldRecreateSwapchain(VkResult result) {
 DisplayVk::DisplayVk(const VulkanDispatch& vk, VkPhysicalDevice vkPhysicalDevice,
                      uint32_t swapChainQueueFamilyIndex, uint32_t compositorQueueFamilyIndex,
                      VkDevice vkDevice, VkQueue compositorVkQueue,
-                     std::shared_ptr<android::base::Lock> compositorVkQueueLock,
+                     std::shared_ptr<gfxstream::base::Lock> compositorVkQueueLock,
                      VkQueue swapChainVkqueue,
-                     std::shared_ptr<android::base::Lock> swapChainVkQueueLock)
+                     std::shared_ptr<gfxstream::base::Lock> swapChainVkQueueLock)
     : m_vk(vk),
       m_vkPhysicalDevice(vkPhysicalDevice),
       m_swapChainQueueFamilyIndex(swapChainQueueFamilyIndex),
@@ -86,16 +97,20 @@ DisplayVk::~DisplayVk() {
 
 void DisplayVk::drainQueues() {
     {
-        android::base::AutoLock lock(*m_swapChainVkQueueLock);
+        gfxstream::base::AutoLock lock(*m_swapChainVkQueueLock);
         VK_CHECK(vk_util::waitForVkQueueIdleWithRetry(m_vk, m_swapChainVkQueue));
     }
     // We don't assume all VkCommandBuffer submitted to m_compositorVkQueueLock is always followed
     // by another operation on the m_swapChainVkQueue. Therefore, only waiting for the
     // m_swapChainVkQueue is not enough to guarantee all resources used are free to be destroyed.
     {
-        android::base::AutoLock lock(*m_compositorVkQueueLock);
+        gfxstream::base::AutoLock lock(*m_compositorVkQueueLock);
         VK_CHECK(vk_util::waitForVkQueueIdleWithRetry(m_vk, m_compositorVkQueue));
     }
+}
+
+void DisplayVk::clear() {
+    GFXSTREAM_FATAL("DisplayVk::%s: Unimplemented", __func__);
 }
 
 void DisplayVk::bindToSurfaceImpl(gfxstream::DisplaySurface* surface) {
@@ -121,18 +136,16 @@ bool DisplayVk::recreateSwapchain() {
 
     const auto* surface = getBoundSurface();
     if (!surface) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "DisplayVk can't create VkSwapchainKHR without a VkSurfaceKHR";
+        GFXSTREAM_FATAL("DisplayVk can't create VkSwapchainKHR without a VkSurfaceKHR");
     }
     const auto* surfaceVk = static_cast<const DisplaySurfaceVk*>(surface->getImpl());
 
     if (!SwapChainStateVk::validateQueueFamilyProperties(
             m_vk, m_vkPhysicalDevice, surfaceVk->getSurface(), m_swapChainQueueFamilyIndex)) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "DisplayVk can't create VkSwapchainKHR with given VkDevice and VkSurfaceKHR.";
+        GFXSTREAM_FATAL("DisplayVk can't create VkSwapchainKHR with given VkDevice and VkSurfaceKHR.");
     }
-    INFO("Creating swapchain with size %" PRIu32 "x%" PRIu32 ".", surface->getWidth(),
-         surface->getHeight());
+    GFXSTREAM_INFO("Creating swapchain with size %" PRIu32 "x%" PRIu32 ".", surface->getWidth(),
+                   surface->getHeight());
     auto swapChainCi = SwapChainStateVk::createSwapChainCi(
         m_vk, surfaceVk->getSurface(), m_vkPhysicalDevice, surface->getWidth(),
         surface->getHeight(), {m_swapChainQueueFamilyIndex, m_compositorQueueFamilyIndex});
@@ -143,9 +156,9 @@ bool DisplayVk::recreateSwapchain() {
     m_vk.vkGetPhysicalDeviceFormatProperties(m_vkPhysicalDevice,
                                              swapChainCi->mCreateInfo.imageFormat, &formatProps);
     if (!(formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) {
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-            << "DisplayVk: The image format chosen for present VkImage can't be used as the color "
-               "attachment, and therefore can't be used as the render target of CompositorVk.";
+        GFXSTREAM_FATAL(
+            "DisplayVk: The image format chosen for present VkImage can't be used as the color "
+            "attachment, and therefore can't be used as the render target of CompositorVk.");
     }
     m_swapChainStateVk =
         SwapChainStateVk::createSwapChainVk(m_vk, m_vkDevice, swapChainCi->mCreateInfo);
@@ -168,7 +181,7 @@ DisplayVk::PostResult DisplayVk::post(const BorrowedImageInfo* sourceImageInfo) 
 
     const auto* surface = getBoundSurface();
     if (!surface) {
-        ERR("Trying to present to non-existing surface!");
+        GFXSTREAM_ERROR("Trying to present to non-existing surface!");
         return PostResult{
             .success = true,
             .postCompletedWaitable = completedFuture,
@@ -176,23 +189,22 @@ DisplayVk::PostResult DisplayVk::post(const BorrowedImageInfo* sourceImageInfo) 
     }
 
     if (m_needToRecreateSwapChain) {
-        INFO("Recreating swapchain...");
+        GFXSTREAM_INFO("Recreating swapchain...");
 
         constexpr const int kMaxRecreateSwapchainRetries = 8;
         int retriesRemaining = kMaxRecreateSwapchainRetries;
         while (retriesRemaining >= 0 && !recreateSwapchain()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             --retriesRemaining;
-            INFO("Swapchain recreation failed, retrying...");
+            GFXSTREAM_INFO("Swapchain recreation failed, retrying...");
         }
 
         if (retriesRemaining < 0) {
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                << "Failed to create Swapchain."
-                << " w:" << surface->getWidth() << " h:" << surface->getHeight();
+            GFXSTREAM_FATAL("Failed to create Swapchain. w:%d h:%d",
+                            surface->getWidth(), surface->getHeight());
         }
 
-        INFO("Recreating swapchain completed.");
+        GFXSTREAM_INFO("Recreating swapchain completed.");
     }
 
     auto result = postImpl(sourceImageInfo);
@@ -232,7 +244,7 @@ DisplayVk::PostResult DisplayVk::postImpl(const BorrowedImageInfo* sourceImageIn
     const auto* sourceImageInfoVk = static_cast<const BorrowedImageInfoVk*>(sourceImageInfo);
     struct ImageBorrower {
         ImageBorrower(const VulkanDispatch& vk, VkQueue queue,
-                      std::shared_ptr<android::base::Lock> queueLock, uint32_t usedQueueFamilyIndex,
+                      std::shared_ptr<gfxstream::base::Lock> queueLock, uint32_t usedQueueFamilyIndex,
                       const BorrowedImageInfoVk& image, const ImageBorrowResource& acquireResource,
                       const ImageBorrowResource& releaseResource)
             : m_vk(vk),
@@ -312,7 +324,7 @@ DisplayVk::PostResult DisplayVk::postImpl(const BorrowedImageInfo* sourceImageIn
             };
             // Submit the acquire commands.
             {
-                android::base::AutoLock lock(*m_queueLock);
+                gfxstream::base::AutoLock lock(*m_queueLock);
                 VK_CHECK(
                     m_vk.vkQueueSubmit(m_vkQueue, 1, &submitInfo, acquireResource.m_completeFence));
             }
@@ -320,7 +332,7 @@ DisplayVk::PostResult DisplayVk::postImpl(const BorrowedImageInfo* sourceImageIn
 
         const VulkanDispatch& m_vk;
         const VkQueue m_vkQueue;
-        std::shared_ptr<android::base::Lock> m_queueLock;
+        std::shared_ptr<gfxstream::base::Lock> m_queueLock;
         const ImageBorrowResource& m_releaseResource;
         ~ImageBorrower() {
             VkSubmitInfo submitInfo = {
@@ -335,7 +347,7 @@ DisplayVk::PostResult DisplayVk::postImpl(const BorrowedImageInfo* sourceImageIn
             };
             // Submit the release commands.
             {
-                android::base::AutoLock lock(*m_queueLock);
+                gfxstream::base::AutoLock lock(*m_queueLock);
                 VK_CHECK(m_vk.vkQueueSubmit(m_vkQueue, 1, &submitInfo,
                                             m_releaseResource.m_completeFence));
             }
@@ -346,12 +358,12 @@ DisplayVk::PostResult DisplayVk::postImpl(const BorrowedImageInfo* sourceImageIn
 
     const auto* surface = getBoundSurface();
     if (!m_swapChainStateVk || !surface) {
-        ERR("Cannot post ColorBuffer: No surface bound.");
+        GFXSTREAM_ERROR("Cannot post ColorBuffer: No surface bound.");
         return PostResult{true, std::move(completedFuture)};
     }
 
     if (!canPost(sourceImageInfoVk->imageCreateInfo)) {
-        ERR("Can't post ColorBuffer.");
+        GFXSTREAM_ERROR("Can't post ColorBuffer.");
         return PostResult{true, std::move(completedFuture)};
     }
 
@@ -361,8 +373,7 @@ DisplayVk::PostResult DisplayVk::postImpl(const BorrowedImageInfo* sourceImageIn
         }
         auto postResourceFuture = postResourceFutureOpt.value();
         if (!postResourceFuture.valid()) {
-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
-                << "Invalid postResourceFuture in m_postResourceFutures.";
+            GFXSTREAM_FATAL("Invalid postResourceFuture in m_postResourceFutures.");
         }
         std::future_status status = postResourceFuture.wait_for(std::chrono::seconds(0));
         if (status == std::future_status::ready) {
@@ -516,7 +527,7 @@ DisplayVk::PostResult DisplayVk::postImpl(const BorrowedImageInfo* sourceImageIn
                                .signalSemaphoreCount = 1,
                                .pSignalSemaphores = &postCompleteSemaphore};
     {
-        android::base::AutoLock lock(*m_compositorVkQueueLock);
+        gfxstream::base::AutoLock lock(*m_compositorVkQueueLock);
         VK_CHECK(m_vk.vkQueueSubmit(m_compositorVkQueue, 1, &submitInfo, postCompleteFence));
     }
     std::shared_future<std::shared_ptr<PostResource>> postResourceFuture =
@@ -545,7 +556,7 @@ DisplayVk::PostResult DisplayVk::postImpl(const BorrowedImageInfo* sourceImageIn
                                     .pImageIndices = &imageIndex};
     VkResult presentRes;
     {
-        android::base::AutoLock lock(*m_swapChainVkQueueLock);
+        gfxstream::base::AutoLock lock(*m_swapChainVkQueueLock);
         presentRes = m_vk.vkQueuePresentKHR(m_swapChainVkQueue, &presentInfo);
     }
     if (shouldRecreateSwapchain(presentRes)) {
@@ -577,7 +588,7 @@ VkFormatFeatureFlags DisplayVk::getFormatFeatures(VkFormat format, VkImageTiling
     } else if (tiling == VK_IMAGE_TILING_OPTIMAL) {
         formatFeatures = formatProperties.optimalTilingFeatures;
     } else {
-        ERR("Unknown tiling %#" PRIx64 ".", static_cast<uint64_t>(tiling));
+        GFXSTREAM_ERROR("Unknown tiling %#" PRIx64 ".", static_cast<uint64_t>(tiling));
     }
     return formatFeatures;
 }
@@ -587,7 +598,7 @@ bool DisplayVk::canPost(const VkImageCreateInfo& postImageCi) {
     // VK_FORMAT_FEATURE_BLIT_SRC_BIT.
     VkFormatFeatureFlags formatFeatures = getFormatFeatures(postImageCi.format, postImageCi.tiling);
     if (!(formatFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT)) {
-        ERR(
+        GFXSTREAM_ERROR(
             "VK_FORMAT_FEATURE_BLIT_SRC_BLIT is not supported for VkImage with format %s, tilling "
             "%s. Supported features are %s.",
             string_VkFormat(postImageCi.format), string_VkImageTiling(postImageCi.tiling),
@@ -598,15 +609,15 @@ bool DisplayVk::canPost(const VkImageCreateInfo& postImageCi) {
     // According to VUID-vkCmdBlitImage-srcImage-06421, srcImage must not use a format that requires
     // a sampler Y’CBCR conversion.
     if (formatRequiresSamplerYcbcrConversion(postImageCi.format)) {
-        ERR("Format %s requires a sampler Y'CbCr conversion. Can't be used to post.",
-                         string_VkFormat(postImageCi.format));
+        GFXSTREAM_ERROR("Format %s requires a sampler Y'CbCr conversion. Can't be used to post.",
+                        string_VkFormat(postImageCi.format));
         return false;
     }
 
     if (!(postImageCi.usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
         // According to VUID-vkCmdBlitImage-srcImage-00219, srcImage must have been created with
         // VK_IMAGE_USAGE_TRANSFER_SRC_BIT usage flag.
-        ERR(
+        GFXSTREAM_ERROR(
             "The VkImage is not created with the VK_IMAGE_USAGE_TRANSFER_SRC_BIT usage flag. The "
             "usage flags are %s.",
             string_VkImageUsageFlags(postImageCi.usage).c_str());
@@ -619,7 +630,7 @@ bool DisplayVk::canPost(const VkImageCreateInfo& postImageCi) {
         // created with a signed integer VkFormat, the other must also have been created with a
         // signed integer VkFormat.
         if (!(formatIsSInt(postImageCi.format) && formatIsSInt(m_swapChainStateVk->getFormat()))) {
-            ERR(
+            GFXSTREAM_ERROR(
                 "The format(%s) doesn't match with the format of the presentable image(%s): either "
                 "of the formats is a signed integer VkFormat, but the other is not.",
                 string_VkFormat(postImageCi.format), string_VkFormat(swapChainFormat));
@@ -632,7 +643,7 @@ bool DisplayVk::canPost(const VkImageCreateInfo& postImageCi) {
         // created with an unsigned integer VkFormat, the other must also have been created with an
         // unsigned integer VkFormat.
         if (!(formatIsUInt(postImageCi.format) && formatIsUInt(swapChainFormat))) {
-            ERR(
+            GFXSTREAM_ERROR(
                 "The format(%s) doesn't match with the format of the presentable image(%s): either "
                 "of the formats is an unsigned integer VkFormat, but the other is not.",
                 string_VkFormat(postImageCi.format), string_VkFormat(swapChainFormat));
@@ -644,7 +655,7 @@ bool DisplayVk::canPost(const VkImageCreateInfo& postImageCi) {
         // According to VUID-vkCmdBlitImage-srcImage-00231, if either of srcImage or dstImage was
         // created with a depth/stencil format, the other must have exactly the same format.
         if (postImageCi.format != swapChainFormat) {
-            ERR(
+            GFXSTREAM_ERROR(
                 "The format(%s) doesn't match with the format of the presentable image(%s): either "
                 "of the formats is a depth/stencil VkFormat, but the other is not the same format.",
                 string_VkFormat(postImageCi.format), string_VkFormat(swapChainFormat));
@@ -655,7 +666,7 @@ bool DisplayVk::canPost(const VkImageCreateInfo& postImageCi) {
     if (postImageCi.samples != VK_SAMPLE_COUNT_1_BIT) {
         // According to VUID-vkCmdBlitImage-srcImage-00233, srcImage must have been created with a
         // samples value of VK_SAMPLE_COUNT_1_BIT.
-        ERR(
+        GFXSTREAM_ERROR(
             "The VkImage is not created with the VK_SAMPLE_COUNT_1_BIT samples value. The samples "
             "value is %s.",
             string_VkSampleCountFlagBits(postImageCi.samples));
@@ -664,7 +675,7 @@ bool DisplayVk::canPost(const VkImageCreateInfo& postImageCi) {
     if (postImageCi.flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT) {
         // According to VUID-vkCmdBlitImage-dstImage-02545, dstImage and srcImage must not have been
         // created with flags containing VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT.
-        ERR(
+        GFXSTREAM_ERROR(
             "The VkImage can't be created with flags containing "
             "VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT. The flags are %s.",
             string_VkImageCreateFlags(postImageCi.flags).c_str());

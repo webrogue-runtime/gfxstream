@@ -15,12 +15,11 @@
 */
 
 #include "GLcommon/GLDispatch.h"
+
 #include "GLcommon/GLLibrary.h"
-
-#include "aemu/base/synchronization/Lock.h"
-#include "aemu/base/SharedLibrary.h"
-#include "host-common/logging.h"
-
+#include "gfxstream/SharedLibrary.h"
+#include "gfxstream/synchronization/Lock.h"
+#include "gfxstream/common/logging.h"
 
 #ifdef __linux__
 #include <GL/glx.h>
@@ -45,35 +44,42 @@ static const std::unordered_map<std::string, std::string> sAliasExtra = {
     {"glClearDepthf", "glClearDepth"},
 };
 
-#define LOAD_GL_FUNC(return_type, func_name, signature, args)  do { \
-        if (!func_name) { \
-            void* address = (void *)getGLFuncAddress(#func_name, glLib); \
-            /*Check alias*/ \
-            if (!address) { \
-                address = (void *)getGLFuncAddress(#func_name "OES", glLib); \
-                if (address) GL_LOG("%s not found, using %sOES", #func_name, #func_name); \
-            } \
-            if (!address) { \
-                address = (void *)getGLFuncAddress(#func_name "EXT", glLib); \
-                if (address) GL_LOG("%s not found, using %sEXT", #func_name, #func_name); \
-            } \
-            if (!address) { \
-                address = (void *)getGLFuncAddress(#func_name "ARB", glLib); \
-                if (address) GL_LOG("%s not found, using %sARB", #func_name, #func_name); \
-            } \
-            if (!address) { \
-                const auto& it = sAliasExtra.find(#func_name); \
-                if (it != sAliasExtra.end()) { \
-                    address = (void *)getGLFuncAddress(it->second.c_str(), glLib); \
-                } \
-            } \
-            if (address) { \
-                func_name = (__typeof__(func_name))(address); \
-            } else { \
-                GL_LOG("%s not found", #func_name); \
-                func_name = nullptr; \
-            } \
-        } \
+#define LOAD_GL_FUNC(return_type, func_name, signature, args)                             \
+    do {                                                                                  \
+        if (!func_name) {                                                                 \
+            void* address = (void*)getGLFuncAddress(#func_name, glLib);                   \
+            /*Check alias*/                                                               \
+            if (!address) {                                                               \
+                address = (void*)getGLFuncAddress(#func_name "OES", glLib);               \
+                if (address) {                                                            \
+                    GFXSTREAM_DEBUG("%s not found, using %sOES", #func_name, #func_name); \
+                }                                                                         \
+            }                                                                             \
+            if (!address) {                                                               \
+                address = (void*)getGLFuncAddress(#func_name "EXT", glLib);               \
+                if (address) {                                                            \
+                    GFXSTREAM_DEBUG("%s not found, using %sEXT", #func_name, #func_name); \
+                }                                                                         \
+            }                                                                             \
+            if (!address) {                                                               \
+                address = (void*)getGLFuncAddress(#func_name "ARB", glLib);               \
+                if (address) {                                                            \
+                    GFXSTREAM_DEBUG("%s not found, using %sARB", #func_name, #func_name); \
+                }                                                                         \
+            }                                                                             \
+            if (!address) {                                                               \
+                const auto& it = sAliasExtra.find(#func_name);                            \
+                if (it != sAliasExtra.end()) {                                            \
+                    address = (void*)getGLFuncAddress(it->second.c_str(), glLib);         \
+                }                                                                         \
+            }                                                                             \
+            if (address) {                                                                \
+                func_name = (__typeof__(func_name))(address);                             \
+            } else {                                                                      \
+                GFXSTREAM_VERBOSE("%s not found", #func_name);                            \
+                func_name = nullptr;                                                      \
+            }                                                                             \
+        }                                                                                 \
     } while (0);
 
 #define LOAD_GLEXT_FUNC(return_type, func_name, signature, args) do { \
@@ -110,7 +116,7 @@ static return_type dummy_##func_name signature { \
 
 // Initializing static GLDispatch members*/
 
-android::base::Lock GLDispatch::s_lock;
+gfxstream::base::Lock GLDispatch::s_lock;
 
 #define GL_DISPATCH_DEFINE_POINTER(return_type, function_name, signature, args) \
     return_type (*GLDispatch::function_name) signature = NULL;
@@ -177,7 +183,7 @@ GLESVersion GLDispatch::getGLESVersion() const {
 }
 
 void GLDispatch::dispatchFuncs(GLESVersion version, GlLibrary* glLib, EGLGetProcAddressFunc eglGPA) {
-    android::base::AutoLock mutex(s_lock);
+    gfxstream::base::AutoLock mutex(s_lock);
     if(m_isLoaded)
         return;
 

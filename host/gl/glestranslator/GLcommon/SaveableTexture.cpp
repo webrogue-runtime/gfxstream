@@ -16,19 +16,16 @@
 
 #include "GLcommon/SaveableTexture.h"
 
-#include "aemu/base/ArraySize.h"
-#include "aemu/base/containers/SmallVector.h"
-#include "aemu/base/files/StreamSerializing.h"
-#include "aemu/base/system/System.h"
+#include <algorithm>
 
 #include "GLcommon/GLEScontext.h"
 #include "GLcommon/GLutils.h"
 #include "GLcommon/TextureUtils.h"
-
-#include "host-common/crash_reporter.h"
-#include "host-common/logging.h"
-
-#include <algorithm>
+#include "gfxstream/host/stream_utils.h"
+#include "gfxstream/ArraySize.h"
+#include "gfxstream/system/System.h"
+#include "gfxstream/common/logging.h"
+#include "render-utils/small_vector.h"
 
 #define SAVEABLE_TEXTURE_DEBUG 0
 
@@ -38,10 +35,10 @@
 #define D(fmt,...)
 #endif
 
-// using android::base::ScopedMemoryProfiler;
-// using android::base::LazyInstance;
-// using android::base::MemoryProfiler;
-// using android::base::StringView;
+// using gfxstream::base::ScopedMemoryProfiler;
+// using gfxstream::base::LazyInstance;
+// using gfxstream::base::MemoryProfiler;
+// using gfxstream::base::StringView;
 
 static const GLenum kTexParam[] = {
     GL_TEXTURE_MIN_FILTER,
@@ -520,7 +517,7 @@ SaveableTexture::SaveableTexture(GlobalNameSpace* globalNameSpace,
     mNeedRestore = true;
 }
 
-void SaveableTexture::loadFromStream(android::base::Stream* stream) {
+void SaveableTexture::loadFromStream(gfxstream::Stream* stream) {
     m_target = stream->getBe32();
     m_width = stream->getBe32();
     m_height = stream->getBe32();
@@ -567,23 +564,24 @@ void SaveableTexture::loadFromStream(android::base::Stream* stream) {
         }
         // Load tex param
         loadCollection(stream, &m_texParam,
-                [](android::base::Stream* stream)
+                [](gfxstream::Stream* stream)
                     -> std::unordered_map<GLenum, GLint>::value_type {
                     GLenum pname = stream->getBe32();
                     GLint value = stream->getBe32();
                     return std::make_pair(pname, value);
                 });
     } else if (m_target != 0) {
-        GL_LOG("SaveableTexture::%s: warning: texture target 0x%x not "
-               "supported\n",
-               __func__, m_target);
+        GFXSTREAM_DEBUG(
+            "SaveableTexture::%s: warning: texture target 0x%x not "
+            "supported\n",
+            __func__, m_target);
         fprintf(stderr, "Warning: texture target %d not supported\n", m_target);
     }
     m_loadedFromStream.store(true);
 }
 
 void SaveableTexture::onSave(
-        android::base::Stream* stream) {
+        gfxstream::Stream* stream) {
     stream->putBe32(m_target);
     stream->putBe32(m_width);
     stream->putBe32(m_height);
@@ -602,12 +600,12 @@ void SaveableTexture::onSave(
                 GL_PACK_ALIGNMENT,
         };
         static constexpr GLint pixelStoreDesired[] = {0, 0, 0, 1};
-        GLint pixelStorePrev[android::base::arraySize(pixelStoreIndexes)];
+        GLint pixelStorePrev[gfxstream::base::arraySize(pixelStoreIndexes)];
 
         GLint prevTex = 0;
         GLDispatch& dispatcher = GLEScontext::dispatcher();
         assert(dispatcher.glGetIntegerv);
-        for (int i = 0; i != (int)android::base::arraySize(pixelStoreIndexes); ++i) {
+        for (int i = 0; i != (int)gfxstream::base::arraySize(pixelStoreIndexes); ++i) {
             if (isGles2Gles() && pixelStoreIndexes[i] != GL_PACK_ALIGNMENT &&
                 pixelStoreIndexes[i] != GL_UNPACK_ALIGNMENT) {
                 continue;
@@ -644,12 +642,12 @@ void SaveableTexture::onSave(
         // Texture saving causes hundreds of megabytes of memory ballooning.
         // This could be behind nullptr dereferences in crash reports if
         // the user ran out of commit charge on Windows, which is not measured
-        // in android::base::System::isUnderMemoryPressure.
+        // in gfxstream::base::System::isUnderMemoryPressure.
         //
         // To debug this issue, avoid keeping the imgData buffers around,
         // and log the memory usage.
         //
-        // bool isLowMem = android::base::System::isUnderMemoryPressure();
+        // bool isLowMem = gfxstream::base::System::isUnderMemoryPressure();
         bool isLowMem = true;
 
         auto saveTex = [this, stream, numLevels, &dispatcher, isLowMem](
@@ -680,7 +678,7 @@ void SaveableTexture::onSave(
 
                     //     double megabyte = 1024.0 * 1024.0;
 
-                    //     GL_LOG("%s %s: %f mb current. change: %f mb. texture:"
+                    //     GFXSTREAM_DEBUG("%s %s: %f mb current. change: %f mb. texture:"
                     //            "format 0x%x type 0x%x level 0x%x dims (%u, %u, %u)\n",
                     //            c_str(tag).get(),
                     //            c_str(stage).get(),
@@ -694,8 +692,7 @@ void SaveableTexture::onSave(
 
                     // ScopedMemoryProfiler mem("saveTexture", memoryProfilerCallback);
 
-                    android::base::SmallFixedVector<unsigned char, 16>& buffer
-                        = imgData.get()[level].m_data;
+                    auto& buffer = imgData.get()[level].m_data;
                     if (!isGles2Gles()) {
                         GLint glWidth;
                         GLint glHeight;
@@ -801,13 +798,13 @@ void SaveableTexture::onSave(
                     sizeof(kTexParamGles3) / sizeof(kTexParamGles3[0]));
         }
         saveCollection(stream, texParam,
-                [](android::base::Stream* s,
+                [](gfxstream::Stream* s,
                     const std::unordered_map<GLenum, GLint>::value_type& pair) {
                     s->putBe32(pair.first);
                     s->putBe32(pair.second);
                 });
         // Restore environment
-        for (int i = 0; i != (int)android::base::arraySize(pixelStoreIndexes); ++i) {
+        for (int i = 0; i != (int)gfxstream::base::arraySize(pixelStoreIndexes); ++i) {
             if (isGles2Gles() && pixelStoreIndexes[i] != GL_PACK_ALIGNMENT &&
                 pixelStoreIndexes[i] != GL_UNPACK_ALIGNMENT) {
                 continue;
@@ -831,7 +828,8 @@ void SaveableTexture::onSave(
     } else if (m_target != 0) {
         // SaveableTexture is uninitialized iff a texture hasn't been bound,
         // which will give m_target==0
-        GL_LOG("SaveableTexture::onSave: warning: texture target 0x%x not supported\n", m_target);
+        GFXSTREAM_DEBUG("SaveableTexture::onSave: warning: texture target 0x%x not supported\n",
+                        m_target);
         fprintf(stderr, "Warning: texture target 0x%x not supported\n", m_target);
     }
 }
@@ -847,9 +845,9 @@ void SaveableTexture::restore() {
     m_globalTexObj.reset(new NamedObject(
             GenNameInfo(NamedObjectType::TEXTURE), m_globalNamespace));
     if (!m_globalTexObj) {
-        GL_LOG("SaveableTexture::%s: %p: could not allocate NamedObject for texture\n", __func__, this);
-        emugl::emugl_crash_reporter(
-                "Fatal: could not allocate SaveableTexture m_globalTexObj\n");
+        GFXSTREAM_DEBUG("SaveableTexture::%s: %p: could not allocate NamedObject for texture\n",
+                        __func__, this);
+        GFXSTREAM_FATAL("Could not allocate SaveableTexture m_globalTexObj");
     }
 
     m_globalName = m_globalTexObj->getGlobalName();
@@ -868,8 +866,8 @@ void SaveableTexture::restore() {
 
         static constexpr GLint pixelStoreDesired[] = {0, 0, 0, 0, 0, 1};
 
-        GLint pixelStorePrev[android::base::arraySize(pixelStoreIndexes)];
-        for (int i = 0; i != (int)android::base::arraySize(pixelStoreIndexes); ++i) {
+        GLint pixelStorePrev[gfxstream::base::arraySize(pixelStoreIndexes)];
+        for (int i = 0; i != (int)gfxstream::base::arraySize(pixelStoreIndexes); ++i) {
             if (isGles2Gles() && pixelStoreIndexes[i] != GL_PACK_ALIGNMENT &&
                 pixelStoreIndexes[i] != GL_UNPACK_ALIGNMENT) {
                 continue;
@@ -1026,7 +1024,7 @@ void SaveableTexture::restore() {
         }
         m_texParam.clear();
         // Restore environment
-        for (int i = 0; i != (int)android::base::arraySize(pixelStoreIndexes); ++i) {
+        for (int i = 0; i != (int)gfxstream::base::arraySize(pixelStoreIndexes); ++i) {
             if (isGles2Gles() && pixelStoreIndexes[i] != GL_PACK_ALIGNMENT &&
                 pixelStoreIndexes[i] != GL_UNPACK_ALIGNMENT) {
                 continue;
@@ -1057,8 +1055,7 @@ void SaveableTexture::fillEglImage(EglImage* eglImage) {
     eglImage->texStorageLevels = m_texStorageLevels;
     eglImage->sync = nullptr;
     if (!eglImage->globalTexObj) {
-        GL_LOG("%s: EGL image %p has no global texture object!\n",
-               __func__, eglImage);
+        GFXSTREAM_DEBUG("%s: EGL image %p has no global texture object!\n", __func__, eglImage);
     }
 }
 

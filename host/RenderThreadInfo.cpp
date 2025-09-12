@@ -16,7 +16,7 @@
 
 #include "RenderThreadInfo.h"
 
-#include "aemu/base/synchronization/Lock.h"
+#include "gfxstream/synchronization/Lock.h"
 #include "FrameBuffer.h"
 
 #include <unordered_map>
@@ -24,9 +24,9 @@
 
 namespace gfxstream {
 
-using android::base::AutoLock;
-using android::base::Stream;
-using android::base::Lock;
+using gfxstream::base::AutoLock;
+using gfxstream::Stream;
+using gfxstream::base::Lock;
 
 static thread_local RenderThreadInfo* s_threadInfoPtr;
 
@@ -71,6 +71,7 @@ void RenderThreadInfo::onSave(Stream* stream) {
     // TODO(b/309858017): remove if when ready to bump snapshot version
     if (FrameBuffer::getFB()->getFeatures().VulkanSnapshots.enabled) {
         stream->putBe64(m_puid);
+        stream->putBe32(m_shouldExit);
     }
 
 #if GFXSTREAM_ENABLE_HOST_GLES
@@ -94,6 +95,7 @@ bool RenderThreadInfo::onLoad(Stream* stream) {
     // TODO(b/309858017): remove if when ready to bump snapshot version
     if (FrameBuffer::getFB()->getFeatures().VulkanSnapshots.enabled) {
         m_puid = stream->getBe64();
+        m_shouldExit = stream->getBe32() == 1;
     }
 
 #if GFXSTREAM_ENABLE_HOST_GLES

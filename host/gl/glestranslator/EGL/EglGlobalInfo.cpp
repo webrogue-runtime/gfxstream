@@ -15,17 +15,13 @@
 */
 #include "EglGlobalInfo.h"
 
+#include <string.h>
+
 #include "ClientAPIExts.h"
 #include "EglDisplay.h"
 #include "EglOsApi.h"
-
-#include "host-common/GfxstreamFatalError.h"
 #include "GLcommon/GLutils.h"
-
-#include <string.h>
-
-using emugl::ABORT_REASON_OTHER;
-using emugl::FatalError;
+#include "gfxstream/common/logging.h"
 
 namespace {
 
@@ -43,7 +39,7 @@ static bool sEgl2EglSyncSafeToUse = false;
 void EglGlobalInfo::setEgl2Egl(EGLBoolean enable, bool nullEgl) {
     if (nullEgl && enable == EGL_FALSE) {
         // No point in nullEgl backend for non egl2egl cases.
-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER));
+        GFXSTREAM_FATAL("Enabling non-egl2egl on null egl backend.");
     }
     sEgl2Egl = enable;
     setGles2Gles(enable);
@@ -77,7 +73,7 @@ EglGlobalInfo::EglGlobalInfo(bool nullEgl) {
     if (sEgl2Egl) {
         m_engine = EglOS::getEgl2EglHostInstance(nullEgl);
     } else {
-        m_engine = EglOS::Engine::getHostInstance();
+        m_engine = EglOS::Engine::createHostInstance();
     }
 #endif
     m_display = m_engine->getDefaultDisplay();
@@ -87,12 +83,13 @@ EglGlobalInfo::~EglGlobalInfo() {
     for (size_t n = 0; n < m_displays.size(); ++n) {
         delete m_displays[n];
     }
+    delete m_engine;
 }
 
 EglDisplay* EglGlobalInfo::addDisplay(EGLNativeDisplayType dpy,
                                       EglOS::Display* idpy) {
     //search if it already exists.
-    android::base::AutoLock mutex(m_lock);
+    gfxstream::base::AutoLock mutex(m_lock);
     for (size_t n = 0; n < m_displays.size(); ++n) {
         if (m_displays[n]->getEglOsEngineDisplay() == dpy) {
             return m_displays[n];
@@ -108,7 +105,7 @@ EglDisplay* EglGlobalInfo::addDisplay(EGLNativeDisplayType dpy,
 }
 
 bool  EglGlobalInfo::removeDisplay(EGLDisplay dpy) {
-    android::base::AutoLock mutex(m_lock);
+    gfxstream::base::AutoLock mutex(m_lock);
     for (size_t n = 0; n < m_displays.size(); ++n) {
         if (m_displays[n] == static_cast<EglDisplay*>(dpy)) {
             delete m_displays[n];
@@ -120,7 +117,7 @@ bool  EglGlobalInfo::removeDisplay(EGLDisplay dpy) {
 }
 
 EglDisplay* EglGlobalInfo::getDisplayFromDisplayType(EGLNativeDisplayType dpy) const {
-    android::base::AutoLock mutex(m_lock);
+    gfxstream::base::AutoLock mutex(m_lock);
     for (size_t n = 0; n < m_displays.size(); ++n) {
         if (m_displays[n]->getEglOsEngineDisplay() == dpy) {
             return m_displays[n];
@@ -130,7 +127,7 @@ EglDisplay* EglGlobalInfo::getDisplayFromDisplayType(EGLNativeDisplayType dpy) c
 }
 
 EglDisplay* EglGlobalInfo::getDisplay(EGLDisplay dpy) const {
-    android::base::AutoLock mutex(m_lock);
+    gfxstream::base::AutoLock mutex(m_lock);
     for (size_t n = 0; n < m_displays.size(); ++n) {
         if (m_displays[n] == static_cast<EglDisplay*>(dpy)) {
             return m_displays[n];
@@ -140,7 +137,7 @@ EglDisplay* EglGlobalInfo::getDisplay(EGLDisplay dpy) const {
 }
 
 void EglGlobalInfo::initClientExtFuncTable(GLESVersion ver) {
-    android::base::AutoLock mutex(m_lock);
+    gfxstream::base::AutoLock mutex(m_lock);
     if (!m_gles_extFuncs_inited[ver]) {
         ClientAPIExts::initClientFuncs(m_gles_ifaces[ver], (int)ver - 1);
         m_gles_extFuncs_inited[ver] = true;
@@ -149,14 +146,14 @@ void EglGlobalInfo::initClientExtFuncTable(GLESVersion ver) {
 
 void EglGlobalInfo::markSurfaceForDestroy(EglDisplay* display,
                                           EGLSurface toDestroy) {
-    android::base::AutoLock mutex(m_lock);
+    gfxstream::base::AutoLock mutex(m_lock);
     assert(display);
     m_surfaceDestroyList.push_back(
         std::make_pair(display, toDestroy));
 }
 
 void EglGlobalInfo::sweepDestroySurfaces() {
-    android::base::AutoLock mutex(m_lock);
+    gfxstream::base::AutoLock mutex(m_lock);
     for (auto elt : m_surfaceDestroyList) {
         EglDisplay* dpy = elt.first;
         assert(dpy);
