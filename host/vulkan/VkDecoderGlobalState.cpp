@@ -3214,9 +3214,10 @@ class VkDecoderGlobalState::Impl {
         std::lock_guard<std::mutex> lock(mMutex);
         auto* deviceInfo = gfxstream::base::find(mDeviceInfo, device);
         auto* imageInfo = gfxstream::base::find(mImageInfo, pCreateInfo->image);
-        if (!deviceInfo || !imageInfo) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (!deviceInfo) return VK_ERROR_OUT_OF_HOST_MEMORY;
         VkImageViewCreateInfo createInfo;
         bool needEmulatedAlpha = false;
+        if(imageInfo) {
         if (deviceInfo->needEmulatedDecompression(pCreateInfo->format)) {
             if (imageInfo->compressInfo && imageInfo->compressInfo->outputImage()) {
                 createInfo = *pCreateInfo;
@@ -3236,6 +3237,7 @@ class VkDecoderGlobalState::Impl {
             createInfo.subresourceRange.baseMipLevel = 0;
             pCreateInfo = &createInfo;
         }
+        }
         // if (imageInfo->anbInfo && imageInfo->anbInfo->isExternallyBacked()) {
         //     createInfo = *pCreateInfo;
         //     pCreateInfo = &createInfo;
@@ -3250,7 +3252,9 @@ class VkDecoderGlobalState::Impl {
         auto& imageViewInfo = mImageViewInfo[*pView];
         imageViewInfo.device = device;
         imageViewInfo.needEmulatedAlpha = needEmulatedAlpha;
+        if(imageInfo) {
         imageViewInfo.boundColorBuffer = imageInfo->boundColorBuffer;
+        }
         if (imageViewInfo.boundColorBuffer) {
             deviceInfo->debugUtilsHelper.addDebugLabel(*pView, "ColorBuffer:%d",
                                                        *imageViewInfo.boundColorBuffer);
@@ -6423,7 +6427,7 @@ class VkDecoderGlobalState::Impl {
     ) {
         VkDeviceMemory memory = unbox_VkDeviceMemory((VkDeviceMemory)boxed_deviceMemory);
         
-        auto* info = android::base::find(mWebrogueMemoryInfo, memory);
+        auto* info = gfxstream::base::find(mWebrogueMemoryInfo, memory);
         if (!info) return;
         assert(offset >= info->mappedOffset);
         // TODO handle "whole size" case
@@ -6439,7 +6443,7 @@ class VkDecoderGlobalState::Impl {
     ) {
         VkDeviceMemory memory = unbox_VkDeviceMemory((VkDeviceMemory)boxed_deviceMemory);
         
-        auto* info = android::base::find(mWebrogueMemoryInfo, memory);
+        auto* info = gfxstream::base::find(mWebrogueMemoryInfo, memory);
         if (!info) return;
         assert(offset >= info->mappedOffset);
         // TODO handle "whole size" case
@@ -6448,7 +6452,7 @@ class VkDecoderGlobalState::Impl {
     }
 
     void on_vkUnmapMemory(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle, VkDevice device,
-                          VkDeviceMemory) {
+                          VkDeviceMemory memory) {
         std::lock_guard<std::mutex> lock(mMutex);
         on_vkUnmapMemoryLocked(device, memory);
     }
@@ -8516,6 +8520,20 @@ class VkDecoderGlobalState::Impl {
         return vk->vkQueuePresentKHR(queue, pPresentInfo);
     }
 
+    VkResult on_vkGetSwapchainImagesKHR(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
+                                        VkDevice boxed_device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount,
+                                        VkImage* pSwapchainImages) {
+        auto device = unbox_VkDevice(boxed_device);
+        auto vk = dispatch_VkDevice(boxed_device);
+        VkResult result = vk->vkGetSwapchainImagesKHR(device, swapchain, pSwapchainImageCount, pSwapchainImages);
+        if(pSwapchainImages && pSwapchainImageCount && *pSwapchainImageCount) {
+            for(int i = 0; i < *pSwapchainImageCount; i++) {
+                pSwapchainImages[i] = new_boxed_non_dispatchable_VkImage(pSwapchainImages[i]);
+            }
+        }
+        return result;
+    }
+
     void on_vkGetLinearImageLayoutGOOGLE(gfxstream::base::BumpPool* pool,
                                          VkSnapshotApiCallHandle apiCallHandle, VkDevice boxed_device,
                                          VkFormat format, VkDeviceSize* pOffset,
@@ -10553,6 +10571,15 @@ VkResult VkDecoderGlobalState::on_vkQueuePresentKHR(gfxstream::base::BumpPool* p
                                                     VkQueue queue,
                                                     const VkPresentInfoKHR* pPresentInfo) {
     return mImpl->on_vkQueuePresentKHR(pool, apiCallHandle, queue, pPresentInfo);
+}
+
+
+VkResult VkDecoderGlobalState::on_vkGetSwapchainImagesKHR(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
+                                        VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount,
+                                        VkImage* pSwapchainImages) {
+    return mImpl->on_vkGetSwapchainImagesKHR(pool, apiCallHandle,
+                                       device, swapchain, pSwapchainImageCount,
+                                       pSwapchainImages);
 }
 
 void VkDecoderGlobalState::on_vkGetPhysicalDeviceProperties2KHR(

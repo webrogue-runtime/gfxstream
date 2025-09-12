@@ -881,6 +881,10 @@ class VkDecoderGlobalState {
                                   VkSnapshotApiCallHandle apiCallHandle, VkQueue queue,
                                   const VkPresentInfoKHR* pPresentInfo);
 
+    VkResult on_vkGetSwapchainImagesKHR(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
+                                        VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount,
+                                        VkImage* pSwapchainImages);
+
     VkResult on_vkCreateSamplerYcbcrConversion(
         gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
         const VkSamplerYcbcrConversionCreateInfo* pCreateInfo,
