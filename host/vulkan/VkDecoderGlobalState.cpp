@@ -6072,112 +6072,150 @@ class VkDecoderGlobalState::Impl {
         if (emulateHostVisible) {
             if (createBlobInfoPtr && createBlobInfoPtr->blobMem == STREAM_BLOB_MEM_GUEST &&
                 (createBlobInfoPtr->blobFlags & STREAM_BLOB_FLAG_CREATE_GUEST_HANDLE)) {
-//                 DescriptorType rawDescriptor;
-//                 auto descriptorInfoOpt = ExternalObjectManager::get()->removeBlobDescriptorInfo(
-//                     virtioGpuContextId, createBlobInfoPtr->blobId);
-//                 if (descriptorInfoOpt) {
-//                     auto rawDescriptorOpt =
-//                         (*descriptorInfoOpt).descriptorInfo.descriptor.release();
-//                     if (rawDescriptorOpt) {
-//                         rawDescriptor = *rawDescriptorOpt;
-//                     } else {
-//                         GFXSTREAM_ERROR("Failed vkAllocateMemory: missing raw descriptor.");
-//                         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-//                     }
-//                 } else {
-//                     GFXSTREAM_ERROR("Failed vkAllocateMemory: missing descriptor info.");
-//                     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-//                 }
+#if 1
+                #ifdef PAGE_SIZE
+                    VkDeviceSize page_size = PAGE_SIZE;
+                #elif defined(_WIN32)
+                    VkDeviceSize page_size = 4096;
+                #else
+                    VkDeviceSize page_size = getpagesize();
+                #endif
+                localAllocInfo.allocationSize += static_cast<VkDeviceSize>(page_size);
+                localAllocInfo.allocationSize &= ~static_cast<VkDeviceSize>(page_size - 1);
+                auto* webrogueMemoryInfo = gfxstream::base::find(mWebrogueMemoryInfo, createBlobInfoPtr->blobId);
+                if (!webrogueMemoryInfo) abort();
+                mappedPtr = webrogueMemoryInfo->mappedPtr;
+                int mappedPtrAlignment =
+                    reinterpret_cast<uintptr_t>(mappedPtr) % kPageSizeforBlob;
+                if (mappedPtrAlignment != 0) {
+                    abort();
+                    GFXSTREAM_ERROR(
+                        "Warning: Mapped shared memory pointer is not aligned to page size, "
+                        "alignment "
+                        "is: %d",
+                        mappedPtrAlignment);
+                }
+                importHostInfo = {
+                    .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+                    .pNext = NULL,
+                    .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                    .pHostPointer = mappedPtr,
+                };
+                vk_append_struct(&structChainIter, &*importHostInfo);
+#else
+                DescriptorType rawDescriptor;
+                auto descriptorInfoOpt = ExternalObjectManager::get()->removeBlobDescriptorInfo(
+                    virtioGpuContextId, createBlobInfoPtr->blobId);
+                if (descriptorInfoOpt) {
+                    auto rawDescriptorOpt =
+                        (*descriptorInfoOpt).descriptorInfo.descriptor.release();
+                    if (rawDescriptorOpt) {
+                        rawDescriptor = *rawDescriptorOpt;
+                    } else {
+                        GFXSTREAM_ERROR("Failed vkAllocateMemory: missing raw descriptor.");
+                        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+                    }
+                } else {
+                    GFXSTREAM_ERROR("Failed vkAllocateMemory: missing descriptor info.");
+                    return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+                }
 
-// #if defined(__linux__)
-//                 if (!m_vkEmulation->supportsDmaBuf() || !deviceHasDmabufExt) {
-//                     GFXSTREAM_ERROR("dmabuf not supported");
-//                     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-//                 }
+#if defined(__linux__)
+                if (!m_vkEmulation->supportsDmaBuf() || !deviceHasDmabufExt) {
+                    GFXSTREAM_ERROR("dmabuf not supported");
+                    return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+                }
 
-//                 importFdInfo.fd = rawDescriptor;
-//                 importFdInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
-//                 vk_append_struct(&structChainIter, &importFdInfo);
-// #else
-//                 (void)virtioGpuContextId;  // suppress warnings
-//                 (void)deviceHasDmabufExt;
-//                 GFXSTREAM_ERROR("Guest Handle flow should not work here");
-//                 return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-// #endif
-//             } else if (m_vkEmulation->getFeatures().SystemBlob.enabled ||
-//                        m_vkEmulation->getFeatures().VulkanAllocateHostVisibleAsUdmabuf.enabled) {
-//                 // Ensure size is page-aligned.
-//                 VkDeviceSize alignedSize = ALIGN(localAllocInfo.allocationSize, kPageSizeforBlob);
-//                 if (alignedSize != localAllocInfo.allocationSize) {
-//                     GFXSTREAM_ERROR("Warning: Aligning allocation size from %llu to %llu",
-//                                     static_cast<unsigned long long>(localAllocInfo.allocationSize),
-//                                     static_cast<unsigned long long>(alignedSize));
-//                 }
-//                 localAllocInfo.allocationSize = alignedSize;
-//                 auto memory = SharedMemory("shared-memory-vk-" + std::to_string(sUniqueShmemId++),
-//                                            localAllocInfo.allocationSize);
+                importFdInfo.fd = rawDescriptor;
+                importFdInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+                vk_append_struct(&structChainIter, &importFdInfo);
+#else
+                (void)virtioGpuContextId;  // suppress warnings
+                (void)deviceHasDmabufExt;
+                GFXSTREAM_ERROR("Guest Handle flow should not work here");
+                return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+#endif
+#endif
+            } else if (m_vkEmulation->getFeatures().SystemBlob.enabled ||
+                       m_vkEmulation->getFeatures().VulkanAllocateHostVisibleAsUdmabuf.enabled) {
+#if 1
+                abort();
+#else
+                auto* deviceInfo = gfxstream::base::find(mDeviceInfo, device);
+                if (!deviceInfo) return VK_ERROR_OUT_OF_HOST_MEMORY;
+                // Ensure size is page-aligned.
+                VkDeviceSize alignedSize = ALIGN(localAllocInfo.allocationSize, kPageSizeforBlob);
+                if (alignedSize != localAllocInfo.allocationSize) {
+                    GFXSTREAM_ERROR("Warning: Aligning allocation size from %llu to %llu",
+                                    static_cast<unsigned long long>(localAllocInfo.allocationSize),
+                                    static_cast<unsigned long long>(alignedSize));
+                }
+                localAllocInfo.allocationSize = alignedSize;
+                auto memory = SharedMemory("shared-memory-vk-" + std::to_string(sUniqueShmemId++),
+                                           localAllocInfo.allocationSize);
 
-//                 if (m_vkEmulation->getFeatures().VulkanAllocateHostVisibleAsUdmabuf.enabled) {
-//                     // 0755 = user read write
-//                     int ret = memory.createNoMapping(0755);
-//                     if (ret) {
-//                         GFXSTREAM_ERROR("Failed to create shared memory, error: %d", ret);
-//                         return VK_ERROR_OUT_OF_HOST_MEMORY;
-//                     }
+                if (m_vkEmulation->getFeatures().VulkanAllocateHostVisibleAsUdmabuf.enabled) {
+                    // 0755 = user read write
+                    int ret = memory.createNoMapping(0755);
+                    if (ret) {
+                        GFXSTREAM_ERROR("Failed to create shared memory, error: %d", ret);
+                        return VK_ERROR_OUT_OF_HOST_MEMORY;
+                    }
 
-//                     auto creator = m_vkEmulation->getUdmabufCreator();
-//                     if (!creator) {
-//                         GFXSTREAM_ERROR("Failed to get OS handle manager");
-//                         return VK_ERROR_OUT_OF_HOST_MEMORY;
-//                     }
+                    auto creator = m_vkEmulation->getUdmabufCreator();
+                    if (!creator) {
+                        GFXSTREAM_ERROR("Failed to get OS handle manager");
+                        return VK_ERROR_OUT_OF_HOST_MEMORY;
+                    }
 
-//                     auto descriptor = creator->handleFromSharedMemory(memory);
-//                     if (!descriptor.has_value()) {
-//                         GFXSTREAM_ERROR("Failed to create handle from shared memory");
-//                         return VK_ERROR_OUT_OF_HOST_MEMORY;
-//                     }
+                    auto descriptor = creator->handleFromSharedMemory(memory);
+                    if (!descriptor.has_value()) {
+                        GFXSTREAM_ERROR("Failed to create handle from shared memory");
+                        return VK_ERROR_OUT_OF_HOST_MEMORY;
+                    }
 
-//                     // Import operation takes ownership of descriptor
-// #if defined(__linux__)
-//                     if (!m_vkEmulation->supportsDmaBuf() || !deviceHasDmabufExt) {
-//                         GFXSTREAM_ERROR("dmabuf not supported");
-//                         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-//                     }
+                    // Import operation takes ownership of descriptor
+#if defined(__linux__)
+                    if (!m_vkEmulation->supportsDmaBuf() || !deviceHasDmabufExt) {
+                        GFXSTREAM_ERROR("dmabuf not supported");
+                        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+                    }
 
-//                     importFdInfo.fd = descriptor.value();
-//                     importFdInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
-//                     vk_append_struct(&structChainIter, &importFdInfo);
-// #else
-//                     GFXSTREAM_ERROR("Import from shared memory should not work here");
-//                     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-// #endif
-//                 } else if (m_vkEmulation->getFeatures().SystemBlob.enabled) {
-//                     int ret = memory.create(0600);
-//                     if (ret) {
-//                         GFXSTREAM_ERROR(
-//                             "Failed to create system-blob host-visible memory, error: %d", ret);
-//                         return VK_ERROR_OUT_OF_HOST_MEMORY;
-//                     }
-//                     mappedPtr = memory.get();
-//                     int mappedPtrAlignment =
-//                         reinterpret_cast<uintptr_t>(mappedPtr) % kPageSizeforBlob;
-//                     if (mappedPtrAlignment != 0) {
-//                         GFXSTREAM_ERROR(
-//                             "Warning: Mapped shared memory pointer is not aligned to page size, "
-//                             "alignment "
-//                             "is: %d",
-//                             mappedPtrAlignment);
-//                     }
-//                     importHostInfo = {
-//                         .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
-//                         .pNext = NULL,
-//                         .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-//                         .pHostPointer = mappedPtr,
-//                     };
-//                     vk_append_struct(&structChainIter, &*importHostInfo);
-//                 }
+                    importFdInfo.fd = descriptor.value();
+                    importFdInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+                    vk_append_struct(&structChainIter, &importFdInfo);
+#else
+                    GFXSTREAM_ERROR("Import from shared memory should not work here");
+                    return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+#endif
+                } else if (m_vkEmulation->getFeatures().SystemBlob.enabled) {
+                    int ret = memory.create(0600);
+                    if (ret) {
+                        GFXSTREAM_ERROR(
+                            "Failed to create system-blob host-visible memory, error: %d", ret);
+                        return VK_ERROR_OUT_OF_HOST_MEMORY;
+                    }
+                    mappedPtr = memory.get();
+                    int mappedPtrAlignment =
+                        reinterpret_cast<uintptr_t>(mappedPtr) % kPageSizeforBlob;
+                    if (mappedPtrAlignment != 0) {
+                        GFXSTREAM_ERROR(
+                            "Warning: Mapped shared memory pointer is not aligned to page size, "
+                            "alignment "
+                            "is: %d",
+                            mappedPtrAlignment);
+                    }
+                    importHostInfo = {
+                        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+                        .pNext = NULL,
+                        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                        .pHostPointer = mappedPtr,
+                    };
+                    vk_append_struct(&structChainIter, &*importHostInfo);
+                }
 
-//                 sharedMemory = std::make_optional<SharedMemory>(std::move(memory));
+                sharedMemory = std::make_optional<SharedMemory>(std::move(memory));
+#endif
             } else if (m_vkEmulation->getFeatures().ExternalBlob.enabled) {
                 VkExternalMemoryHandleTypeFlags handleTypes;
 
@@ -6398,72 +6436,17 @@ class VkDecoderGlobalState::Impl {
     VkResult on_vkMapMemoryLocked(VkDevice boxed_device, VkDeviceMemory memory, VkDeviceSize offset,
                                   VkDeviceSize size, VkMemoryMapFlags flags, void** ppData)
         REQUIRES(mMutex) {
-        auto device = unbox_VkDevice(boxed_device);
-        auto vk = dispatch_VkDevice(boxed_device);
         auto* info = gfxstream::base::find(mMemoryInfo, memory);
         if (!info || !info->ptr) return VK_ERROR_MEMORY_MAP_FAILED;  // Invalid usage.
 
-        void* data;
-        VkResult result = vk->vkMapMemory(device, memory, offset, size, 0, &data);
-
-        if(result != VK_SUCCESS) {
-            return result;
-        }
-
-        mWebrogueMemoryInfo[memory] = { 
-            .mappedOffset = offset, 
-            .mappedSize = size, 
-            .mappedPtr = data 
-        };
-    
+        *ppData = (void*)((uint8_t*)info->ptr + offset);
         return VK_SUCCESS;
     }
 
-    void webrogue_gfxstream_ffi_read_device_memory(
-        void* buf, 
-        uint64_t len, 
-        uint64_t offset, 
-        uint64_t boxed_deviceMemory
-    ) {
-        VkDeviceMemory memory = unbox_VkDeviceMemory((VkDeviceMemory)boxed_deviceMemory);
-        
-        auto* info = gfxstream::base::find(mWebrogueMemoryInfo, memory);
-        if (!info) return;
-        assert(offset >= info->mappedOffset);
-        // TODO handle "whole size" case
-        // assert(offset + len >= info->mappedOffset + info->mappedSize);
-        memcpy(buf, ((uint8_t *) info->mappedPtr) + offset - info->mappedOffset, len);
-    }
-
-    void webrogue_gfxstream_ffi_write_device_memory(
-        void* buf, 
-        uint64_t len, 
-        uint64_t offset, 
-        uint64_t boxed_deviceMemory
-    ) {
-        VkDeviceMemory memory = unbox_VkDeviceMemory((VkDeviceMemory)boxed_deviceMemory);
-        
-        auto* info = gfxstream::base::find(mWebrogueMemoryInfo, memory);
-        if (!info) return;
-        assert(offset >= info->mappedOffset);
-        // TODO handle "whole size" case
-        // assert(offset + len >= info->mappedOffset + info->mappedSize);
-        memcpy(((uint8_t *) info->mappedPtr) + offset - info->mappedOffset, buf, len);
-    }
-
-    void on_vkUnmapMemory(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle, VkDevice device,
-                          VkDeviceMemory memory) {
-        std::lock_guard<std::mutex> lock(mMutex);
-        on_vkUnmapMemoryLocked(device, memory);
-    }
-
-    void on_vkUnmapMemoryLocked(VkDevice boxed_device, VkDeviceMemory memory)
-        REQUIRES(mMutex) {
-        auto device = unbox_VkDevice(boxed_device);
-        auto vk = dispatch_VkDevice(boxed_device);
-
-        vk->vkUnmapMemory(device, memory);
-        mWebrogueMemoryInfo.erase(memory);
+    void on_vkUnmapMemory(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle, VkDevice,
+                          VkDeviceMemory) {
+        // no-op; user-level mapping does not correspond
+        // to any operation here.
     }
 
     uint8_t* getMappedHostPointer(VkDeviceMemory memory) {
@@ -9052,6 +9035,17 @@ class VkDecoderGlobalState::Impl {
         // return anbInfo->registerQsriCallback(image, std::move(callback));
     }
 
+    void registerWebrogueBlob(
+        void* buf,
+        uint64_t size,
+        uint64_t id
+    ) {
+        mWebrogueMemoryInfo[id] = {
+            .mappedPtr = buf,
+            .mappedSize = size,
+        };
+    }
+
 #define GUEST_EXTERNAL_MEMORY_HANDLE_TYPES                                \
     (VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID | \
      VK_EXTERNAL_MEMORY_HANDLE_TYPE_ZIRCON_VMO_BIT_FUCHSIA | \
@@ -10280,7 +10274,7 @@ class VkDecoderGlobalState::Impl {
     std::unordered_map<VkDescriptorUpdateTemplate, DescriptorUpdateTemplateInfo>
         mDescriptorUpdateTemplateInfo GUARDED_BY(mMutex);
     std::unordered_map<VkDeviceMemory, MemoryInfo> mMemoryInfo GUARDED_BY(mMutex);
-    std::unordered_map<VkDeviceMemory, WebrogueMemoryInfo> mWebrogueMemoryInfo GUARDED_BY(mMutex);
+    std::unordered_map<uint64_t, WebrogueMemoryInfo> mWebrogueMemoryInfo GUARDED_BY(mMutex);
     std::unordered_map<VkFence, FenceInfo> mFenceInfo GUARDED_BY(mMutex);
     std::unordered_map<VkFramebuffer, FramebufferInfo> mFramebufferInfo GUARDED_BY(mMutex);
     std::unordered_map<VkImage, ImageInfo> mImageInfo GUARDED_BY(mMutex);
@@ -11849,31 +11843,15 @@ void VkDecoderGlobalState::deviceMemoryTransform_fromhost(
 
 VkDecoderSnapshot* VkDecoderGlobalState::snapshot() { return mImpl->snapshot(); }
 
-void VkDecoderGlobalState::webrogue_gfxstream_ffi_read_device_memory(
-    void* buf, 
-    uint64_t len, 
-    uint64_t offset, 
-    uint64_t boxed_deviceMemory
+void VkDecoderGlobalState::registerWebrogueBlob(
+    void* buf,
+    uint64_t size,
+    uint64_t id
 ) { 
-    mImpl->webrogue_gfxstream_ffi_read_device_memory(
+    mImpl->registerWebrogueBlob(
         buf,
-        len, 
-        offset, 
-        boxed_deviceMemory
-    ); 
-}
-
-void VkDecoderGlobalState::webrogue_gfxstream_ffi_write_device_memory(
-    void* buf, 
-    uint64_t len, 
-    uint64_t offset, 
-    uint64_t boxed_deviceMemory
-) { 
-    mImpl->webrogue_gfxstream_ffi_write_device_memory(
-        buf,
-        len, 
-        offset, 
-        boxed_deviceMemory
+        size, 
+        id
     ); 
 }
 

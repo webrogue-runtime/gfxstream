@@ -926,6 +926,13 @@ class VkDecoderGlobalState {
     // that many times.
     AsyncResult registerQsriCallback(VkImage boxed_image, VkQsriTimeline::Callback callback);
 
+    // Webrogue
+    void registerWebrogueBlob(
+        void* buf,
+        uint64_t size,
+        uint64_t id
+    );
+
     // Transformations
     void deviceMemoryTransform_tohost(VkDeviceMemory* memory, uint32_t memoryCount,
                                       VkDeviceSize* offset, uint32_t offsetCount,
@@ -937,21 +944,6 @@ class VkDecoderGlobalState {
                                         VkDeviceSize* size, uint32_t sizeCount, uint32_t* typeIndex,
                                         uint32_t typeIndexCount, uint32_t* typeBits,
                                         uint32_t typeBitsCount);
-
-    void webrogue_gfxstream_ffi_read_device_memory(
-        void* buf, 
-        uint64_t len, 
-        uint64_t offset, 
-        uint64_t boxed_deviceMemory
-    );
-
-    void webrogue_gfxstream_ffi_write_device_memory(
-        void* buf, 
-        uint64_t len, 
-        uint64_t offset, 
-        uint64_t boxed_deviceMemory
-    );
-
     // Snapshot access
     VkDecoderSnapshot* snapshot();
 
