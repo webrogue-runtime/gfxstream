@@ -230,7 +230,12 @@ private:
 
 // Sequence lock implementation
 // See https://en.wikipedia.org/wiki/Seqlock for more info
-static inline __attribute__((always_inline)) void SmpWmb() {
+
+static inline
+#ifndef _MSC_VER
+__attribute__((always_inline))
+#endif
+void SmpWmb() {
 #if defined(__aarch64__)
         asm volatile("dmb ishst" ::: "memory");
 #elif defined(__x86_64__)
@@ -240,7 +245,11 @@ static inline __attribute__((always_inline)) void SmpWmb() {
 #endif
 }
 
-static inline __attribute__((always_inline)) void SmpRmb() {
+static inline 
+#ifndef _MSC_VER
+__attribute__((always_inline))
+#endif
+void SmpRmb() {
 #if defined(__aarch64__)
         asm volatile("dmb ishld" ::: "memory");
 #elif defined(__x86_64__)
@@ -264,12 +273,17 @@ public:
         mWriteLock.unlock();
     }
 
+#ifdef _MSC_VER
+#   define SEQLOCK_LIKELY( exp )    (exp)
+#   define SEQLOCK_UNLIKELY( exp )  (exp)
+#else
 #ifdef __cplusplus
 #   define SEQLOCK_LIKELY( exp )    (__builtin_expect( !!(exp), true ))
 #   define SEQLOCK_UNLIKELY( exp )  (__builtin_expect( !!(exp), false ))
 #else
 #   define SEQLOCK_LIKELY( exp )    (__builtin_expect( !!(exp), 1 ))
 #   define SEQLOCK_UNLIKELY( exp )  (__builtin_expect( !!(exp), 0 ))
+#endif
 #endif
 
     uint32_t beginRead() {

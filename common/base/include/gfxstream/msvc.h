@@ -43,12 +43,12 @@ extern "C" {
 #include <fcntl.h>
 #include <limits.h>
 #include <stdlib.h>
-#include <strings.h>
-#include <sys/cdefs.h>
+// #include <strings.h>
+// #include <sys/cdefs.h>
 #include <sys/stat.h>
-#include <sys/time.h>
+// #include <sys/time.h>
 #include <sys/types.h>
-#include <unistd.h>
+// #include <unistd.h>
 
 #ifndef fseeko
 #define fseeko _fseeki64
@@ -56,6 +56,11 @@ extern "C" {
 
 #ifndef ftello
 #define ftello _ftelli64
+#endif
+
+
+#ifndef mode_t
+#define mode_t uint32_t
 #endif
 
 extern int asprintf(char** buf, const char* format, ...);

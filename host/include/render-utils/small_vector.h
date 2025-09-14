@@ -245,6 +245,9 @@ protected:
     void grow_for_size(size_type newSize) {
         // Grow by 1.5x by default.
         if (newSize > capacity()) {
+#ifdef max
+#undef max
+#endif
             set_capacity(std::max(newSize, capacity() + capacity() / 2));
         }
     }

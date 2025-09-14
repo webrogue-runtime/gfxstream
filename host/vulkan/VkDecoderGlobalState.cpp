@@ -437,593 +437,593 @@ class VkDecoderGlobalState::Impl {
         stateBlock->deviceDispatch->vkDestroyCommandPool(stateBlock->device, stateBlock->commandPool, nullptr);
     }
 
-    void save(gfxstream::Stream* stream) {
-        GFXSTREAM_DEBUG("VulkanSnapshots save (begin)");
-        std::lock_guard<std::mutex> lock(mMutex);
+//     void save(gfxstream::Stream* stream) {
+//         GFXSTREAM_DEBUG("VulkanSnapshots save (begin)");
+//         std::lock_guard<std::mutex> lock(mMutex);
 
-        mSnapshotState = SnapshotState::Saving;
+//         mSnapshotState = SnapshotState::Saving;
 
-#ifdef CONFIG_AEMU
-        if (!mInstanceInfo.empty()) {
-            get_gfxstream_vm_operations().set_snapshot_uses_vulkan();
-        }
-#endif
+// #ifdef CONFIG_AEMU
+//         if (!mInstanceInfo.empty()) {
+//             get_gfxstream_vm_operations().set_snapshot_uses_vulkan();
+//         }
+// #endif
 
-        GFXSTREAM_DEBUG("snapshot save: setup internal structures");
-        {
-            std::unordered_map<VkDevice, uint32_t> deviceToContextId;
-            for (const auto& [device, deviceInfo] : mDeviceInfo) {
-                if (!deviceInfo.virtioGpuContextId) {
-                    GFXSTREAM_FATAL("VkDevice:%p missing context id.", device);
-                }
-                deviceToContextId[deviceInfo.boxed] = *deviceInfo.virtioGpuContextId;
-            }
-            stream->putBe64(static_cast<uint64_t>(deviceToContextId.size()));
-            for (const auto [device, contextId] : deviceToContextId) {
-                stream->putBe64(reinterpret_cast<uint64_t>(device));
-                stream->putBe32(contextId);
-            }
-        }
+//         GFXSTREAM_DEBUG("snapshot save: setup internal structures");
+//         {
+//             std::unordered_map<VkDevice, uint32_t> deviceToContextId;
+//             for (const auto& [device, deviceInfo] : mDeviceInfo) {
+//                 if (!deviceInfo.virtioGpuContextId) {
+//                     GFXSTREAM_FATAL("VkDevice:%p missing context id.", device);
+//                 }
+//                 deviceToContextId[deviceInfo.boxed] = *deviceInfo.virtioGpuContextId;
+//             }
+//             stream->putBe64(static_cast<uint64_t>(deviceToContextId.size()));
+//             for (const auto [device, contextId] : deviceToContextId) {
+//                 stream->putBe64(reinterpret_cast<uint64_t>(device));
+//                 stream->putBe32(contextId);
+//             }
+//         }
 
-        GFXSTREAM_DEBUG("snapshot save: save boxed instance and context id");
-        {
-            stream->putBe64(static_cast<uint64_t>(mInstanceInfo.size()));
-            for (const auto& [instance, instanceInfo] : mInstanceInfo) {
-                stream->putBe64(reinterpret_cast<uint64_t>(instanceInfo.boxed));
-                stream->putBe32(reinterpret_cast<uint32_t>(instanceInfo.contextId));
-            }
-        }
+//         GFXSTREAM_DEBUG("snapshot save: save boxed instance and context id");
+//         {
+//             stream->putBe64(static_cast<uint64_t>(mInstanceInfo.size()));
+//             for (const auto& [instance, instanceInfo] : mInstanceInfo) {
+//                 stream->putBe64(reinterpret_cast<uint64_t>(instanceInfo.boxed));
+//                 stream->putBe32(reinterpret_cast<uint32_t>(instanceInfo.contextId));
+//             }
+//         }
 
-        snapshot()->saveReplayBuffers(stream);
+//         snapshot()->saveReplayBuffers(stream);
 
-        // Save mapped memory
-        uint32_t memoryCount = 0;
-        for (const auto& it : mMemoryInfo) {
-            if (it.second.ptr) {
-                memoryCount++;
-            }
-        }
-        GFXSTREAM_DEBUG("snapshot save: mapped memory");
-        stream->putBe32(memoryCount);
-        for (const auto& it : mMemoryInfo) {
-            if (!it.second.ptr) {
-                continue;
-            }
-            stream->putBe64(reinterpret_cast<uint64_t>(
-                unboxed_to_boxed_non_dispatchable_VkDeviceMemory(it.first)));
-            stream->putBe64(it.second.size);
-            stream->write(it.second.ptr, it.second.size);
-        }
+//         // Save mapped memory
+//         uint32_t memoryCount = 0;
+//         for (const auto& it : mMemoryInfo) {
+//             if (it.second.ptr) {
+//                 memoryCount++;
+//             }
+//         }
+//         GFXSTREAM_DEBUG("snapshot save: mapped memory");
+//         stream->putBe32(memoryCount);
+//         for (const auto& it : mMemoryInfo) {
+//             if (!it.second.ptr) {
+//                 continue;
+//             }
+//             stream->putBe64(reinterpret_cast<uint64_t>(
+//                 unboxed_to_boxed_non_dispatchable_VkDeviceMemory(it.first)));
+//             stream->putBe64(it.second.size);
+//             stream->write(it.second.ptr, it.second.size);
+//         }
 
-        // Set up VK structs to snapshot other Vulkan objects
-        // TODO(b/323064243): group all images from the same device and reuse queue / command pool
+//         // Set up VK structs to snapshot other Vulkan objects
+//         // TODO(b/323064243): group all images from the same device and reuse queue / command pool
 
-        GFXSTREAM_DEBUG("snapshot save: image content");
-        std::vector<VkImage> sortedBoxedImages;
-        for (const auto& imageIte : mImageInfo) {
-            sortedBoxedImages.push_back(unboxed_to_boxed_non_dispatchable_VkImage(imageIte.first));
-        }
-        // Image contents need to be saved and loaded in the same order.
-        // So sort them (by boxed handles) first.
-        std::sort(sortedBoxedImages.begin(), sortedBoxedImages.end());
-        for (const auto& boxedImage : sortedBoxedImages) {
-            auto unboxedImage = try_unbox_VkImage(boxedImage);
-            if (unboxedImage == VK_NULL_HANDLE) {
-                // TODO(b/294277842): should return an error here.
-                continue;
-            }
-            const ImageInfo& imageInfo = mImageInfo[unboxedImage];
-            if (imageInfo.memory == VK_NULL_HANDLE) {
-                continue;
-            }
-            // Vulkan command playback doesn't recover image layout. We need to do it here.
-            stream->putBe32(imageInfo.layout);
+//         GFXSTREAM_DEBUG("snapshot save: image content");
+//         std::vector<VkImage> sortedBoxedImages;
+//         for (const auto& imageIte : mImageInfo) {
+//             sortedBoxedImages.push_back(unboxed_to_boxed_non_dispatchable_VkImage(imageIte.first));
+//         }
+//         // Image contents need to be saved and loaded in the same order.
+//         // So sort them (by boxed handles) first.
+//         std::sort(sortedBoxedImages.begin(), sortedBoxedImages.end());
+//         for (const auto& boxedImage : sortedBoxedImages) {
+//             auto unboxedImage = try_unbox_VkImage(boxedImage);
+//             if (unboxedImage == VK_NULL_HANDLE) {
+//                 // TODO(b/294277842): should return an error here.
+//                 continue;
+//             }
+//             const ImageInfo& imageInfo = mImageInfo[unboxedImage];
+//             if (imageInfo.memory == VK_NULL_HANDLE) {
+//                 continue;
+//             }
+//             // Vulkan command playback doesn't recover image layout. We need to do it here.
+//             stream->putBe32(imageInfo.layout);
 
-            StateBlock stateBlock = createSnapshotStateBlock(imageInfo.device);
-            // TODO(b/294277842): make sure the queue is empty before using.
-            saveImageContent(stream, &stateBlock, unboxedImage, &imageInfo);
-            releaseSnapshotStateBlock(&stateBlock);
-        }
+//             StateBlock stateBlock = createSnapshotStateBlock(imageInfo.device);
+//             // TODO(b/294277842): make sure the queue is empty before using.
+//             saveImageContent(stream, &stateBlock, unboxedImage, &imageInfo);
+//             releaseSnapshotStateBlock(&stateBlock);
+//         }
 
-        // snapshot buffers
-        GFXSTREAM_DEBUG("snapshot save: buffers");
-        std::vector<VkBuffer> sortedBoxedBuffers;
-        for (const auto& bufferIte : mBufferInfo) {
-            sortedBoxedBuffers.push_back(
-                unboxed_to_boxed_non_dispatchable_VkBuffer(bufferIte.first));
-        }
-        sort(sortedBoxedBuffers.begin(), sortedBoxedBuffers.end());
-        for (const auto& boxedBuffer : sortedBoxedBuffers) {
-            auto unboxedBuffer = try_unbox_VkBuffer(boxedBuffer);
-            if (unboxedBuffer == VK_NULL_HANDLE) {
-                // TODO(b/294277842): should return an error here.
-                continue;
-            }
-            const BufferInfo& bufferInfo = mBufferInfo[unboxedBuffer];
-            if (bufferInfo.memory == VK_NULL_HANDLE) {
-                continue;
-            }
-            // TODO: add a special case for host mapped memory
-            StateBlock stateBlock = createSnapshotStateBlock(bufferInfo.device);
+//         // snapshot buffers
+//         GFXSTREAM_DEBUG("snapshot save: buffers");
+//         std::vector<VkBuffer> sortedBoxedBuffers;
+//         for (const auto& bufferIte : mBufferInfo) {
+//             sortedBoxedBuffers.push_back(
+//                 unboxed_to_boxed_non_dispatchable_VkBuffer(bufferIte.first));
+//         }
+//         sort(sortedBoxedBuffers.begin(), sortedBoxedBuffers.end());
+//         for (const auto& boxedBuffer : sortedBoxedBuffers) {
+//             auto unboxedBuffer = try_unbox_VkBuffer(boxedBuffer);
+//             if (unboxedBuffer == VK_NULL_HANDLE) {
+//                 // TODO(b/294277842): should return an error here.
+//                 continue;
+//             }
+//             const BufferInfo& bufferInfo = mBufferInfo[unboxedBuffer];
+//             if (bufferInfo.memory == VK_NULL_HANDLE) {
+//                 continue;
+//             }
+//             // TODO: add a special case for host mapped memory
+//             StateBlock stateBlock = createSnapshotStateBlock(bufferInfo.device);
 
-            // TODO(b/294277842): make sure the queue is empty before using.
-            saveBufferContent(stream, &stateBlock, unboxedBuffer, &bufferInfo);
-            releaseSnapshotStateBlock(&stateBlock);
-        }
+//             // TODO(b/294277842): make sure the queue is empty before using.
+//             saveBufferContent(stream, &stateBlock, unboxedBuffer, &bufferInfo);
+//             releaseSnapshotStateBlock(&stateBlock);
+//         }
 
-        // snapshot descriptors
-        GFXSTREAM_DEBUG("snapshot save: descriptors");
-        std::vector<VkDescriptorPool> sortedBoxedDescriptorPools;
-        for (const auto& descriptorPoolIte : mDescriptorPoolInfo) {
-            auto boxed =
-                unboxed_to_boxed_non_dispatchable_VkDescriptorPool(descriptorPoolIte.first);
-            sortedBoxedDescriptorPools.push_back(boxed);
-        }
-        int dpoolcount = sortedBoxedDescriptorPools.size();
-        std::sort(sortedBoxedDescriptorPools.begin(), sortedBoxedDescriptorPools.end());
-        GFXSTREAM_DEBUG("snapshot save: %d descriptor pools", dpoolcount);
-        for (const auto& boxedDescriptorPool : sortedBoxedDescriptorPools) {
-            auto unboxedDescriptorPool = unbox_VkDescriptorPool(boxedDescriptorPool);
-            const DescriptorPoolInfo& poolInfo = mDescriptorPoolInfo[unboxedDescriptorPool];
+//         // snapshot descriptors
+//         GFXSTREAM_DEBUG("snapshot save: descriptors");
+//         std::vector<VkDescriptorPool> sortedBoxedDescriptorPools;
+//         for (const auto& descriptorPoolIte : mDescriptorPoolInfo) {
+//             auto boxed =
+//                 unboxed_to_boxed_non_dispatchable_VkDescriptorPool(descriptorPoolIte.first);
+//             sortedBoxedDescriptorPools.push_back(boxed);
+//         }
+//         int dpoolcount = sortedBoxedDescriptorPools.size();
+//         std::sort(sortedBoxedDescriptorPools.begin(), sortedBoxedDescriptorPools.end());
+//         GFXSTREAM_DEBUG("snapshot save: %d descriptor pools", dpoolcount);
+//         for (const auto& boxedDescriptorPool : sortedBoxedDescriptorPools) {
+//             auto unboxedDescriptorPool = unbox_VkDescriptorPool(boxedDescriptorPool);
+//             const DescriptorPoolInfo& poolInfo = mDescriptorPoolInfo[unboxedDescriptorPool];
 
-            auto poolIds = poolInfo.poolIds;
-            if (!m_vkEmulation->getFeatures().VulkanBatchedDescriptorSetUpdate.enabled) {
-                poolIds.clear();
-                // we need to fake pool ids
-                for (auto it : poolInfo.allocedSetsToBoxed) {
-                    auto boxedSet = it.second;
-                    poolIds.push_back((uint64_t)boxedSet);
-                }
-                sort(poolIds.begin(), poolIds.end());
-            }
-            int dcount = poolIds.size();
-            GFXSTREAM_DEBUG("snapshot save: %d descriptor pool for this pool", dcount);
-            for (uint64_t poolId : poolIds) {
-                BoxedHandleInfo* setHandleInfo = sBoxedHandleManager.get(poolId);
-                bool allocated = setHandleInfo->underlying != 0;
-                stream->putByte(allocated);
-                if (!allocated) {
-                    GFXSTREAM_DEBUG("snapshot save: skip 0x%llx descriptor set for this pool",
-                                    (unsigned long long)poolId);
-                    continue;
-                }
-                GFXSTREAM_DEBUG("snapshot save: keep 0x%llx descriptor set for this pool",
-                                (unsigned long long)poolId);
+//             auto poolIds = poolInfo.poolIds;
+//             if (!m_vkEmulation->getFeatures().VulkanBatchedDescriptorSetUpdate.enabled) {
+//                 poolIds.clear();
+//                 // we need to fake pool ids
+//                 for (auto it : poolInfo.allocedSetsToBoxed) {
+//                     auto boxedSet = it.second;
+//                     poolIds.push_back((uint64_t)boxedSet);
+//                 }
+//                 sort(poolIds.begin(), poolIds.end());
+//             }
+//             int dcount = poolIds.size();
+//             GFXSTREAM_DEBUG("snapshot save: %d descriptor pool for this pool", dcount);
+//             for (uint64_t poolId : poolIds) {
+//                 BoxedHandleInfo* setHandleInfo = sBoxedHandleManager.get(poolId);
+//                 bool allocated = setHandleInfo->underlying != 0;
+//                 stream->putByte(allocated);
+//                 if (!allocated) {
+//                     GFXSTREAM_DEBUG("snapshot save: skip 0x%llx descriptor set for this pool",
+//                                     (unsigned long long)poolId);
+//                     continue;
+//                 }
+//                 GFXSTREAM_DEBUG("snapshot save: keep 0x%llx descriptor set for this pool",
+//                                 (unsigned long long)poolId);
 
-                const DescriptorSetInfo& descriptorSetInfo =
-                    mDescriptorSetInfo[(VkDescriptorSet)setHandleInfo->underlying];
-                VkDescriptorSetLayout boxedLayout =
-                    unboxed_to_boxed_non_dispatchable_VkDescriptorSetLayout(
-                        descriptorSetInfo.unboxedLayout);
-                stream->putBe64((uint64_t)boxedLayout);
-                // Count all valid descriptors.
-                //
-                // There is a use case where user can create an image, write it to a descriptor,
-                // read/write the image by committing a command, then delete the image without
-                // unbinding the descriptor. For example:
-                //
-                // T1: create "vkimage1" (original)
-                // T2: update binding1 of vkdescriptorset1 with vkimage1
-                // T3: draw
-                // T4: delete "vkimage1" (original)
-                // T5: create "vkimage1" (recycled)
-                // T6: snapshot load
-                //
-                // At the point of the snapshot, the original vk image has been invalidated,
-                // thus we cannot call vkUpdateDescriptorSets for it, and need to remove it
-                // from the snapshot.
-                //
-                // The current implementation bases on smart pointers. A descriptor set info
-                // holds weak pointers to their underlying resources (image, image view, buffer).
-                // On snapshot load, we check if any of the smart pointers are invalidated.
-                //
-                // An alternative approach has been discussed by, instead of using smart
-                // pointers, checking valid handles on snapshot save. This approach has the
-                // advantage that it reduces number of smart pointer allocations. After discussion
-                // we concluded that there is at least one corner case that will break the
-                // alternative approach. That is when the user deletes a bound vkimage and creates
-                // a new vkimage. The driver is free to reuse released handles, thus we might
-                // end up having a new vkimage with the same handle as the old one (see T5 in the
-                // example), and think the binding is still valid. And if we bind the new image
-                // regardless, we might hit a Vulkan validation error because the new image might
-                // have the "usage" flag that is unsuitable to bind to descriptors.
-                std::vector<std::pair<int, int>> validWriteIndices;
-                for (int bindingIdx = 0; bindingIdx < (int)descriptorSetInfo.allWrites.size();
-                     bindingIdx++) {
-                    for (int bindingElemIdx = 0;
-                         bindingElemIdx < (int)descriptorSetInfo.allWrites[bindingIdx].size();
-                         bindingElemIdx++) {
-                        const auto& entry = descriptorSetInfo.allWrites[bindingIdx][bindingElemIdx];
-                        if (entry.writeType == DescriptorSetInfo::DescriptorWriteType::Empty) {
-                            continue;
-                        }
-                        int dependencyObjCount =
-                            descriptorDependencyObjectCount(entry.descriptorType);
-                        if ((int)entry.alives.size() < dependencyObjCount) {
-                            continue;
-                        }
-                        bool isValid = true;
-                        for (const auto& alive : entry.alives) {
-                            isValid &= !alive.expired();
-                            if (!isValid) {
-                                break;
-                            }
-                        }
-                        if (!isValid) {
-                            continue;
-                        }
-                        validWriteIndices.push_back(std::make_pair(bindingIdx, bindingElemIdx));
-                    }
-                }
-                stream->putBe64(validWriteIndices.size());
-                // Save all valid descriptors
-                for (const auto& idx : validWriteIndices) {
-                    const auto& entry = descriptorSetInfo.allWrites[idx.first][idx.second];
-                    stream->putBe32(idx.first);
-                    stream->putBe32(idx.second);
-                    stream->putBe32(entry.writeType);
-                    // entry.descriptorType might be redundant.
-                    stream->putBe32(entry.descriptorType);
-                    switch (entry.writeType) {
-                        case DescriptorSetInfo::DescriptorWriteType::ImageInfo: {
-                            VkDescriptorImageInfo imageInfo = entry.imageInfo;
-                            // Get the unboxed version
-                            imageInfo.imageView =
-                                descriptorTypeContainsImage(entry.descriptorType)
-                                    ? unboxed_to_boxed_non_dispatchable_VkImageView(
-                                          imageInfo.imageView)
-                                    : VK_NULL_HANDLE;
-                            imageInfo.sampler =
-                                descriptorTypeContainsSampler(entry.descriptorType)
-                                    ? unboxed_to_boxed_non_dispatchable_VkSampler(imageInfo.sampler)
-                                    : VK_NULL_HANDLE;
-                            stream->write(&imageInfo, sizeof(imageInfo));
-                        } break;
-                        case DescriptorSetInfo::DescriptorWriteType::BufferInfo: {
-                            VkDescriptorBufferInfo bufferInfo = entry.bufferInfo;
-                            // Get the unboxed version
-                            bufferInfo.buffer =
-                                unboxed_to_boxed_non_dispatchable_VkBuffer(bufferInfo.buffer);
-                            stream->write(&bufferInfo, sizeof(bufferInfo));
-                        } break;
-                        case DescriptorSetInfo::DescriptorWriteType::BufferView: {
-                            // Get the unboxed version
-                            VkBufferView bufferView =
-                                unboxed_to_boxed_non_dispatchable_VkBufferView(entry.bufferView);
-                            stream->write(&bufferView, sizeof(bufferView));
-                        } break;
-                        case DescriptorSetInfo::DescriptorWriteType::InlineUniformBlock:
-                        case DescriptorSetInfo::DescriptorWriteType::AccelerationStructure:
-                            // TODO
-                            GFXSTREAM_FATAL("Encountered pending inline uniform block or acceleration "
-                                            "structure desc write, abort (NYI)");
-                            break;
-                        default:
-                            break;
-                    }
-                }
-            }
-        }
+//                 const DescriptorSetInfo& descriptorSetInfo =
+//                     mDescriptorSetInfo[(VkDescriptorSet)setHandleInfo->underlying];
+//                 VkDescriptorSetLayout boxedLayout =
+//                     unboxed_to_boxed_non_dispatchable_VkDescriptorSetLayout(
+//                         descriptorSetInfo.unboxedLayout);
+//                 stream->putBe64((uint64_t)boxedLayout);
+//                 // Count all valid descriptors.
+//                 //
+//                 // There is a use case where user can create an image, write it to a descriptor,
+//                 // read/write the image by committing a command, then delete the image without
+//                 // unbinding the descriptor. For example:
+//                 //
+//                 // T1: create "vkimage1" (original)
+//                 // T2: update binding1 of vkdescriptorset1 with vkimage1
+//                 // T3: draw
+//                 // T4: delete "vkimage1" (original)
+//                 // T5: create "vkimage1" (recycled)
+//                 // T6: snapshot load
+//                 //
+//                 // At the point of the snapshot, the original vk image has been invalidated,
+//                 // thus we cannot call vkUpdateDescriptorSets for it, and need to remove it
+//                 // from the snapshot.
+//                 //
+//                 // The current implementation bases on smart pointers. A descriptor set info
+//                 // holds weak pointers to their underlying resources (image, image view, buffer).
+//                 // On snapshot load, we check if any of the smart pointers are invalidated.
+//                 //
+//                 // An alternative approach has been discussed by, instead of using smart
+//                 // pointers, checking valid handles on snapshot save. This approach has the
+//                 // advantage that it reduces number of smart pointer allocations. After discussion
+//                 // we concluded that there is at least one corner case that will break the
+//                 // alternative approach. That is when the user deletes a bound vkimage and creates
+//                 // a new vkimage. The driver is free to reuse released handles, thus we might
+//                 // end up having a new vkimage with the same handle as the old one (see T5 in the
+//                 // example), and think the binding is still valid. And if we bind the new image
+//                 // regardless, we might hit a Vulkan validation error because the new image might
+//                 // have the "usage" flag that is unsuitable to bind to descriptors.
+//                 std::vector<std::pair<int, int>> validWriteIndices;
+//                 for (int bindingIdx = 0; bindingIdx < (int)descriptorSetInfo.allWrites.size();
+//                      bindingIdx++) {
+//                     for (int bindingElemIdx = 0;
+//                          bindingElemIdx < (int)descriptorSetInfo.allWrites[bindingIdx].size();
+//                          bindingElemIdx++) {
+//                         const auto& entry = descriptorSetInfo.allWrites[bindingIdx][bindingElemIdx];
+//                         if (entry.writeType == DescriptorSetInfo::DescriptorWriteType::Empty) {
+//                             continue;
+//                         }
+//                         int dependencyObjCount =
+//                             descriptorDependencyObjectCount(entry.descriptorType);
+//                         if ((int)entry.alives.size() < dependencyObjCount) {
+//                             continue;
+//                         }
+//                         bool isValid = true;
+//                         for (const auto& alive : entry.alives) {
+//                             isValid &= !alive.expired();
+//                             if (!isValid) {
+//                                 break;
+//                             }
+//                         }
+//                         if (!isValid) {
+//                             continue;
+//                         }
+//                         validWriteIndices.push_back(std::make_pair(bindingIdx, bindingElemIdx));
+//                     }
+//                 }
+//                 stream->putBe64(validWriteIndices.size());
+//                 // Save all valid descriptors
+//                 for (const auto& idx : validWriteIndices) {
+//                     const auto& entry = descriptorSetInfo.allWrites[idx.first][idx.second];
+//                     stream->putBe32(idx.first);
+//                     stream->putBe32(idx.second);
+//                     stream->putBe32(entry.writeType);
+//                     // entry.descriptorType might be redundant.
+//                     stream->putBe32(entry.descriptorType);
+//                     switch (entry.writeType) {
+//                         case DescriptorSetInfo::DescriptorWriteType::ImageInfo: {
+//                             VkDescriptorImageInfo imageInfo = entry.imageInfo;
+//                             // Get the unboxed version
+//                             imageInfo.imageView =
+//                                 descriptorTypeContainsImage(entry.descriptorType)
+//                                     ? unboxed_to_boxed_non_dispatchable_VkImageView(
+//                                           imageInfo.imageView)
+//                                     : VK_NULL_HANDLE;
+//                             imageInfo.sampler =
+//                                 descriptorTypeContainsSampler(entry.descriptorType)
+//                                     ? unboxed_to_boxed_non_dispatchable_VkSampler(imageInfo.sampler)
+//                                     : VK_NULL_HANDLE;
+//                             stream->write(&imageInfo, sizeof(imageInfo));
+//                         } break;
+//                         case DescriptorSetInfo::DescriptorWriteType::BufferInfo: {
+//                             VkDescriptorBufferInfo bufferInfo = entry.bufferInfo;
+//                             // Get the unboxed version
+//                             bufferInfo.buffer =
+//                                 unboxed_to_boxed_non_dispatchable_VkBuffer(bufferInfo.buffer);
+//                             stream->write(&bufferInfo, sizeof(bufferInfo));
+//                         } break;
+//                         case DescriptorSetInfo::DescriptorWriteType::BufferView: {
+//                             // Get the unboxed version
+//                             VkBufferView bufferView =
+//                                 unboxed_to_boxed_non_dispatchable_VkBufferView(entry.bufferView);
+//                             stream->write(&bufferView, sizeof(bufferView));
+//                         } break;
+//                         case DescriptorSetInfo::DescriptorWriteType::InlineUniformBlock:
+//                         case DescriptorSetInfo::DescriptorWriteType::AccelerationStructure:
+//                             // TODO
+//                             GFXSTREAM_FATAL("Encountered pending inline uniform block or acceleration "
+//                                             "structure desc write, abort (NYI)");
+//                             break;
+//                         default:
+//                             break;
+//                     }
+//                 }
+//             }
+//         }
 
-        // Fences
-        GFXSTREAM_DEBUG("snapshot save: fences");
-        std::vector<VkFence> unsignaledFencesBoxed;
-        for (const auto& fence : mFenceInfo) {
-            if (!fence.second.boxed) {
-                continue;
-            }
-            const auto& device = fence.second.device;
-            const auto& deviceInfo = gfxstream::base::find(mDeviceInfo, device);
-            VulkanDispatch* dvk = dispatch_VkDevice(deviceInfo->boxed);
-            if (VK_NOT_READY == dvk->vkGetFenceStatus(device, fence.first)) {
-                unsignaledFencesBoxed.push_back(fence.second.boxed);
-            }
-        }
-        stream->putBe64(unsignaledFencesBoxed.size());
-        stream->write(unsignaledFencesBoxed.data(), unsignaledFencesBoxed.size() * sizeof(VkFence));
+//         // Fences
+//         GFXSTREAM_DEBUG("snapshot save: fences");
+//         std::vector<VkFence> unsignaledFencesBoxed;
+//         for (const auto& fence : mFenceInfo) {
+//             if (!fence.second.boxed) {
+//                 continue;
+//             }
+//             const auto& device = fence.second.device;
+//             const auto& deviceInfo = gfxstream::base::find(mDeviceInfo, device);
+//             VulkanDispatch* dvk = dispatch_VkDevice(deviceInfo->boxed);
+//             if (VK_NOT_READY == dvk->vkGetFenceStatus(device, fence.first)) {
+//                 unsignaledFencesBoxed.push_back(fence.second.boxed);
+//             }
+//         }
+//         stream->putBe64(unsignaledFencesBoxed.size());
+//         stream->write(unsignaledFencesBoxed.data(), unsignaledFencesBoxed.size() * sizeof(VkFence));
 
-        // Events
-        saveEvents(stream);
+//         // Events
+//         saveEvents(stream);
 
-        // Semaphores
-        saveSemaphores(stream);
+//         // Semaphores
+//         saveSemaphores(stream);
 
-        mSnapshotState = SnapshotState::Normal;
-        GFXSTREAM_DEBUG("VulkanSnapshots save (end)");
-    }
+//         mSnapshotState = SnapshotState::Normal;
+//         GFXSTREAM_DEBUG("VulkanSnapshots save (end)");
+//     }
 
-    void load(gfxstream::Stream* stream, GfxApiLogger& gfxLogger,
-              HealthMonitor<>* healthMonitor) {
-        // assume that we already destroyed all instances
-        // from FrameBuffer's onLoad method.
-        GFXSTREAM_DEBUG("VulkanSnapshots load (begin)");
+//     void load(gfxstream::Stream* stream, GfxApiLogger& gfxLogger,
+//               HealthMonitor<>* healthMonitor) {
+//         // assume that we already destroyed all instances
+//         // from FrameBuffer's onLoad method.
+//         GFXSTREAM_DEBUG("VulkanSnapshots load (begin)");
 
-        // destroy all current internal data structures
-        GFXSTREAM_DEBUG("snapshot load: setup internal structures");
-        {
-            std::lock_guard<std::mutex> lock(mMutex);
+//         // destroy all current internal data structures
+//         GFXSTREAM_DEBUG("snapshot load: setup internal structures");
+//         {
+//             std::lock_guard<std::mutex> lock(mMutex);
 
-            clearLocked();
+//             clearLocked();
 
-            mSnapshotState = SnapshotState::Loading;
+//             mSnapshotState = SnapshotState::Loading;
 
-            // This needs to happen before the replay in the decoder so that virtio gpu context ids
-            // are available for operations involving `ExternalObjectManager`.
-            mSnapshotLoadVkDeviceToVirtioCpuContextId.emplace();
-            const uint64_t count = stream->getBe64();
-            for (uint64_t i = 0; i < count; i++) {
-                const uint64_t device = stream->getBe64();
-                const uint32_t contextId = stream->getBe32();
-                (*mSnapshotLoadVkDeviceToVirtioCpuContextId)[reinterpret_cast<VkDevice>(device)] =
-                    contextId;
-            }
-        }
+//             // This needs to happen before the replay in the decoder so that virtio gpu context ids
+//             // are available for operations involving `ExternalObjectManager`.
+//             mSnapshotLoadVkDeviceToVirtioCpuContextId.emplace();
+//             const uint64_t count = stream->getBe64();
+//             for (uint64_t i = 0; i < count; i++) {
+//                 const uint64_t device = stream->getBe64();
+//                 const uint32_t contextId = stream->getBe32();
+//                 (*mSnapshotLoadVkDeviceToVirtioCpuContextId)[reinterpret_cast<VkDevice>(device)] =
+//                     contextId;
+//             }
+//         }
 
-        {
-            std::lock_guard<std::mutex> lock(mMutex);
-            mSnapshotLoadBoxedInstance2ContextId.clear();
-            const uint64_t count = stream->getBe64();
-            for (uint64_t i = 0; i < count; i++) {
-                const uint64_t boxed_instance = stream->getBe64();
-                const uint64_t contextId = stream->getBe32();
-                mSnapshotLoadBoxedInstance2ContextId[reinterpret_cast<VkInstance>(boxed_instance)] =
-                    contextId;
-            }
-        }
+//         {
+//             std::lock_guard<std::mutex> lock(mMutex);
+//             mSnapshotLoadBoxedInstance2ContextId.clear();
+//             const uint64_t count = stream->getBe64();
+//             for (uint64_t i = 0; i < count; i++) {
+//                 const uint64_t boxed_instance = stream->getBe64();
+//                 const uint64_t contextId = stream->getBe32();
+//                 mSnapshotLoadBoxedInstance2ContextId[reinterpret_cast<VkInstance>(boxed_instance)] =
+//                     contextId;
+//             }
+//         }
 
-        // Replay command stream:
-        GFXSTREAM_DEBUG("snapshot load: replay command stream");
-        {
-            std::vector<uint64_t> handleReplayBuffer;
-            std::vector<uint8_t> decoderReplayBuffer;
-            VkDecoderSnapshot::loadReplayBuffers(stream, &handleReplayBuffer, &decoderReplayBuffer);
+//         // Replay command stream:
+//         GFXSTREAM_DEBUG("snapshot load: replay command stream");
+//         {
+//             std::vector<uint64_t> handleReplayBuffer;
+//             std::vector<uint8_t> decoderReplayBuffer;
+//             VkDecoderSnapshot::loadReplayBuffers(stream, &handleReplayBuffer, &decoderReplayBuffer);
 
-            sBoxedHandleManager.replayHandles(handleReplayBuffer);
+//             sBoxedHandleManager.replayHandles(handleReplayBuffer);
 
-            VkDecoder decoderForLoading;
-            // A decoder that is set for snapshot load will load up the created handles first,
-            // if any, allowing us to 'catch' the results as they are decoded.
-            decoderForLoading.setForSnapshotLoad(true);
-            TrivialStream trivialStream;
+//             VkDecoder decoderForLoading;
+//             // A decoder that is set for snapshot load will load up the created handles first,
+//             // if any, allowing us to 'catch' the results as they are decoded.
+//             decoderForLoading.setForSnapshotLoad(true);
+//             TrivialStream trivialStream;
 
-            // TODO: This needs to be the puid seqno ptr
-            auto resources = ProcessResources::create();
-            VkDecoderContext context = {
-                .processName = nullptr,
-                .gfxApiLogger = &gfxLogger,
-                .healthMonitor = healthMonitor,
-            };
-            decoderForLoading.decode(decoderReplayBuffer.data(), decoderReplayBuffer.size(),
-                                     &trivialStream, resources.get(), context);
-        }
+//             // TODO: This needs to be the puid seqno ptr
+//             auto resources = ProcessResources::create();
+//             VkDecoderContext context = {
+//                 .processName = nullptr,
+//                 .gfxApiLogger = &gfxLogger,
+//                 .healthMonitor = healthMonitor,
+//             };
+//             decoderForLoading.decode(decoderReplayBuffer.data(), decoderReplayBuffer.size(),
+//                                      &trivialStream, resources.get(), context);
+//         }
 
-        {
-            std::lock_guard<std::mutex> lock(mMutex);
+//         {
+//             std::lock_guard<std::mutex> lock(mMutex);
 
-            // load mapped memory
-            GFXSTREAM_DEBUG("snapshot load: mapped memory");
-            uint32_t memoryCount = stream->getBe32();
-            for (uint32_t i = 0; i < memoryCount; i++) {
-                VkDeviceMemory boxedMemory = reinterpret_cast<VkDeviceMemory>(stream->getBe64());
-                VkDeviceMemory unboxedMemory = unbox_VkDeviceMemory(boxedMemory);
-                auto it = mMemoryInfo.find(unboxedMemory);
-                if (it == mMemoryInfo.end()) {
-                    GFXSTREAM_FATAL("Snapshot load failure: cannot find memory handle for VkDeviceMemory:%p", boxedMemory);
-                }
-                VkDeviceSize size = stream->getBe64();
-                if (size != it->second.size || !it->second.ptr) {
-                    GFXSTREAM_FATAL("Snapshot load failure: memory size does not match for VkDeviceMemory:%p", boxedMemory);
-                }
-                stream->read(it->second.ptr, size);
-            }
-            // Set up VK structs to snapshot other Vulkan objects
-            // TODO(b/323064243): group all images from the same device and reuse queue / command
-            // pool
+//             // load mapped memory
+//             GFXSTREAM_DEBUG("snapshot load: mapped memory");
+//             uint32_t memoryCount = stream->getBe32();
+//             for (uint32_t i = 0; i < memoryCount; i++) {
+//                 VkDeviceMemory boxedMemory = reinterpret_cast<VkDeviceMemory>(stream->getBe64());
+//                 VkDeviceMemory unboxedMemory = unbox_VkDeviceMemory(boxedMemory);
+//                 auto it = mMemoryInfo.find(unboxedMemory);
+//                 if (it == mMemoryInfo.end()) {
+//                     GFXSTREAM_FATAL("Snapshot load failure: cannot find memory handle for VkDeviceMemory:%p", boxedMemory);
+//                 }
+//                 VkDeviceSize size = stream->getBe64();
+//                 if (size != it->second.size || !it->second.ptr) {
+//                     GFXSTREAM_FATAL("Snapshot load failure: memory size does not match for VkDeviceMemory:%p", boxedMemory);
+//                 }
+//                 stream->read(it->second.ptr, size);
+//             }
+//             // Set up VK structs to snapshot other Vulkan objects
+//             // TODO(b/323064243): group all images from the same device and reuse queue / command
+//             // pool
 
-            GFXSTREAM_DEBUG("snapshot load: image content");
-            std::vector<VkImage> sortedBoxedImages;
-            for (const auto& imageIte : mImageInfo) {
-                sortedBoxedImages.push_back(
-                    unboxed_to_boxed_non_dispatchable_VkImage(imageIte.first));
-            }
-            sort(sortedBoxedImages.begin(), sortedBoxedImages.end());
-            for (const auto& boxedImage : sortedBoxedImages) {
-                auto unboxedImage = unbox_VkImage(boxedImage);
-                ImageInfo& imageInfo = mImageInfo[unboxedImage];
-                if (imageInfo.memory == VK_NULL_HANDLE) {
-                    continue;
-                }
-                // Playback doesn't recover image layout. We need to do it here.
-                //
-                // Layout transform was done by vkCmdPipelineBarrier but we don't record such
-                // command directly. Instead, we memorize the current layout and add our own
-                // vkCmdPipelineBarrier after load.
-                //
-                // We do the layout transform in loadImageContent. There are still use cases where
-                // it should recover the layout but does not.
-                //
-                // TODO(b/323059453): fix corner cases when image contents cannot be properly
-                // loaded.
-                imageInfo.layout = static_cast<VkImageLayout>(stream->getBe32());
-                StateBlock stateBlock = createSnapshotStateBlock(imageInfo.device);
-                // TODO(b/294277842): make sure the queue is empty before using.
-                loadImageContent(stream, &stateBlock, unboxedImage, &imageInfo);
-                releaseSnapshotStateBlock(&stateBlock);
-            }
+//             GFXSTREAM_DEBUG("snapshot load: image content");
+//             std::vector<VkImage> sortedBoxedImages;
+//             for (const auto& imageIte : mImageInfo) {
+//                 sortedBoxedImages.push_back(
+//                     unboxed_to_boxed_non_dispatchable_VkImage(imageIte.first));
+//             }
+//             sort(sortedBoxedImages.begin(), sortedBoxedImages.end());
+//             for (const auto& boxedImage : sortedBoxedImages) {
+//                 auto unboxedImage = unbox_VkImage(boxedImage);
+//                 ImageInfo& imageInfo = mImageInfo[unboxedImage];
+//                 if (imageInfo.memory == VK_NULL_HANDLE) {
+//                     continue;
+//                 }
+//                 // Playback doesn't recover image layout. We need to do it here.
+//                 //
+//                 // Layout transform was done by vkCmdPipelineBarrier but we don't record such
+//                 // command directly. Instead, we memorize the current layout and add our own
+//                 // vkCmdPipelineBarrier after load.
+//                 //
+//                 // We do the layout transform in loadImageContent. There are still use cases where
+//                 // it should recover the layout but does not.
+//                 //
+//                 // TODO(b/323059453): fix corner cases when image contents cannot be properly
+//                 // loaded.
+//                 imageInfo.layout = static_cast<VkImageLayout>(stream->getBe32());
+//                 StateBlock stateBlock = createSnapshotStateBlock(imageInfo.device);
+//                 // TODO(b/294277842): make sure the queue is empty before using.
+//                 loadImageContent(stream, &stateBlock, unboxedImage, &imageInfo);
+//                 releaseSnapshotStateBlock(&stateBlock);
+//             }
 
-            // snapshot buffers
-            GFXSTREAM_DEBUG("snapshot load: buffers");
-            std::vector<VkBuffer> sortedBoxedBuffers;
-            for (const auto& bufferIte : mBufferInfo) {
-                sortedBoxedBuffers.push_back(
-                    unboxed_to_boxed_non_dispatchable_VkBuffer(bufferIte.first));
-            }
-            sort(sortedBoxedBuffers.begin(), sortedBoxedBuffers.end());
-            for (const auto& boxedBuffer : sortedBoxedBuffers) {
-                auto unboxedBuffer = unbox_VkBuffer(boxedBuffer);
-                const BufferInfo& bufferInfo = mBufferInfo[unboxedBuffer];
-                if (bufferInfo.memory == VK_NULL_HANDLE) {
-                    continue;
-                }
-                // TODO: add a special case for host mapped memory
-                StateBlock stateBlock = createSnapshotStateBlock(bufferInfo.device);
-                // TODO(b/294277842): make sure the queue is empty before using.
-                loadBufferContent(stream, &stateBlock, unboxedBuffer, &bufferInfo);
-                releaseSnapshotStateBlock(&stateBlock);
-            }
+//             // snapshot buffers
+//             GFXSTREAM_DEBUG("snapshot load: buffers");
+//             std::vector<VkBuffer> sortedBoxedBuffers;
+//             for (const auto& bufferIte : mBufferInfo) {
+//                 sortedBoxedBuffers.push_back(
+//                     unboxed_to_boxed_non_dispatchable_VkBuffer(bufferIte.first));
+//             }
+//             sort(sortedBoxedBuffers.begin(), sortedBoxedBuffers.end());
+//             for (const auto& boxedBuffer : sortedBoxedBuffers) {
+//                 auto unboxedBuffer = unbox_VkBuffer(boxedBuffer);
+//                 const BufferInfo& bufferInfo = mBufferInfo[unboxedBuffer];
+//                 if (bufferInfo.memory == VK_NULL_HANDLE) {
+//                     continue;
+//                 }
+//                 // TODO: add a special case for host mapped memory
+//                 StateBlock stateBlock = createSnapshotStateBlock(bufferInfo.device);
+//                 // TODO(b/294277842): make sure the queue is empty before using.
+//                 loadBufferContent(stream, &stateBlock, unboxedBuffer, &bufferInfo);
+//                 releaseSnapshotStateBlock(&stateBlock);
+//             }
 
-            // snapshot descriptors
-            GFXSTREAM_DEBUG("snapshot load: descriptors");
-            gfxstream::base::BumpPool bumpPool;
-            std::vector<VkDescriptorPool> sortedBoxedDescriptorPools;
-            for (const auto& descriptorPoolIte : mDescriptorPoolInfo) {
-                auto boxed =
-                    unboxed_to_boxed_non_dispatchable_VkDescriptorPool(descriptorPoolIte.first);
-                sortedBoxedDescriptorPools.push_back(boxed);
-            }
-            sort(sortedBoxedDescriptorPools.begin(), sortedBoxedDescriptorPools.end());
-            const bool needToUnboxDescriptorSet =
-                !(m_vkEmulation->getFeatures().VulkanBatchedDescriptorSetUpdate.enabled);
-            for (const auto& boxedDescriptorPool : sortedBoxedDescriptorPools) {
-                auto unboxedDescriptorPool = unbox_VkDescriptorPool(boxedDescriptorPool);
-                const DescriptorPoolInfo& poolInfo = mDescriptorPoolInfo[unboxedDescriptorPool];
+//             // snapshot descriptors
+//             GFXSTREAM_DEBUG("snapshot load: descriptors");
+//             gfxstream::base::BumpPool bumpPool;
+//             std::vector<VkDescriptorPool> sortedBoxedDescriptorPools;
+//             for (const auto& descriptorPoolIte : mDescriptorPoolInfo) {
+//                 auto boxed =
+//                     unboxed_to_boxed_non_dispatchable_VkDescriptorPool(descriptorPoolIte.first);
+//                 sortedBoxedDescriptorPools.push_back(boxed);
+//             }
+//             sort(sortedBoxedDescriptorPools.begin(), sortedBoxedDescriptorPools.end());
+//             const bool needToUnboxDescriptorSet =
+//                 !(m_vkEmulation->getFeatures().VulkanBatchedDescriptorSetUpdate.enabled);
+//             for (const auto& boxedDescriptorPool : sortedBoxedDescriptorPools) {
+//                 auto unboxedDescriptorPool = unbox_VkDescriptorPool(boxedDescriptorPool);
+//                 const DescriptorPoolInfo& poolInfo = mDescriptorPoolInfo[unboxedDescriptorPool];
 
-                std::vector<VkDescriptorSetLayout> layouts;
-                std::vector<uint64_t> poolIds;
-                std::vector<VkWriteDescriptorSet> writeDescriptorSets;
-                std::vector<uint32_t> writeStartingIndices;
+//                 std::vector<VkDescriptorSetLayout> layouts;
+//                 std::vector<uint64_t> poolIds;
+//                 std::vector<VkWriteDescriptorSet> writeDescriptorSets;
+//                 std::vector<uint32_t> writeStartingIndices;
 
-                auto allpoolIds = poolInfo.poolIds;
-                if (!m_vkEmulation->getFeatures().VulkanBatchedDescriptorSetUpdate.enabled) {
-                    allpoolIds.clear();
-                    for (auto it : poolInfo.allocedSetsToBoxed) {
-                        auto boxedSet = it.second;
-                        allpoolIds.push_back((uint64_t)boxedSet);
-                    }
-                    sort(allpoolIds.begin(), allpoolIds.end());
-                }
-                // Temporary structures for the pointers in VkWriteDescriptorSet.
-                // Use unique_ptr so that the pointers don't change when vector resizes.
-                std::vector<std::unique_ptr<VkDescriptorImageInfo>> tmpImageInfos;
-                std::vector<std::unique_ptr<VkDescriptorBufferInfo>> tmpBufferInfos;
-                std::vector<std::unique_ptr<VkBufferView>> tmpBufferViews;
+//                 auto allpoolIds = poolInfo.poolIds;
+//                 if (!m_vkEmulation->getFeatures().VulkanBatchedDescriptorSetUpdate.enabled) {
+//                     allpoolIds.clear();
+//                     for (auto it : poolInfo.allocedSetsToBoxed) {
+//                         auto boxedSet = it.second;
+//                         allpoolIds.push_back((uint64_t)boxedSet);
+//                     }
+//                     sort(allpoolIds.begin(), allpoolIds.end());
+//                 }
+//                 // Temporary structures for the pointers in VkWriteDescriptorSet.
+//                 // Use unique_ptr so that the pointers don't change when vector resizes.
+//                 std::vector<std::unique_ptr<VkDescriptorImageInfo>> tmpImageInfos;
+//                 std::vector<std::unique_ptr<VkDescriptorBufferInfo>> tmpBufferInfos;
+//                 std::vector<std::unique_ptr<VkBufferView>> tmpBufferViews;
 
-                for (uint64_t poolId : allpoolIds) {
-                    bool allocated = stream->getByte();
-                    if (!allocated) {
-                        continue;
-                    }
-                    GFXSTREAM_DEBUG("snapshot load: 0x%llx descriptor set for this pool",
-                                    (unsigned long long)poolId);
-                    poolIds.push_back(poolId);
-                    writeStartingIndices.push_back(writeDescriptorSets.size());
-                    VkDescriptorSetLayout boxedLayout = (VkDescriptorSetLayout)stream->getBe64();
-                    layouts.push_back(unbox_VkDescriptorSetLayout(boxedLayout));
-                    uint64_t validWriteCount = stream->getBe64();
-                    for (uint64_t write = 0; write < validWriteCount; write++) {
-                        uint32_t binding = stream->getBe32();
-                        uint32_t arrayElement = stream->getBe32();
-                        DescriptorSetInfo::DescriptorWriteType writeType =
-                            static_cast<DescriptorSetInfo::DescriptorWriteType>(stream->getBe32());
-                        VkDescriptorType descriptorType =
-                            static_cast<VkDescriptorType>(stream->getBe32());
-                        VkWriteDescriptorSet writeDescriptorSet = {
-                            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                            .dstSet = (VkDescriptorSet)poolId,
-                            .dstBinding = binding,
-                            .dstArrayElement = arrayElement,
-                            .descriptorCount = 1,
-                            .descriptorType = descriptorType,
-                        };
-                        switch (writeType) {
-                            case DescriptorSetInfo::DescriptorWriteType::ImageInfo: {
-                                tmpImageInfos.push_back(std::make_unique<VkDescriptorImageInfo>());
-                                writeDescriptorSet.pImageInfo = tmpImageInfos.back().get();
-                                VkDescriptorImageInfo& imageInfo = *tmpImageInfos.back();
-                                stream->read(&imageInfo, sizeof(imageInfo));
-                                imageInfo.imageView = descriptorTypeContainsImage(descriptorType)
-                                                          ? unbox_VkImageView(imageInfo.imageView)
-                                                          : 0;
-                                imageInfo.sampler = descriptorTypeContainsSampler(descriptorType)
-                                                        ? unbox_VkSampler(imageInfo.sampler)
-                                                        : 0;
-                            } break;
-                            case DescriptorSetInfo::DescriptorWriteType::BufferInfo: {
-                                tmpBufferInfos.push_back(
-                                    std::make_unique<VkDescriptorBufferInfo>());
-                                writeDescriptorSet.pBufferInfo = tmpBufferInfos.back().get();
-                                VkDescriptorBufferInfo& bufferInfo = *tmpBufferInfos.back();
-                                stream->read(&bufferInfo, sizeof(bufferInfo));
-                                bufferInfo.buffer = unbox_VkBuffer(bufferInfo.buffer);
-                            } break;
-                            case DescriptorSetInfo::DescriptorWriteType::BufferView: {
-                                tmpBufferViews.push_back(std::make_unique<VkBufferView>());
-                                writeDescriptorSet.pTexelBufferView = tmpBufferViews.back().get();
-                                VkBufferView& bufferView = *tmpBufferViews.back();
-                                stream->read(&bufferView, sizeof(bufferView));
-                                bufferView = unbox_VkBufferView(bufferView);
-                            } break;
-                            case DescriptorSetInfo::DescriptorWriteType::InlineUniformBlock:
-                            case DescriptorSetInfo::DescriptorWriteType::AccelerationStructure:
-                                // TODO
-                                GFXSTREAM_FATAL("Encountered pending inline uniform block or acceleration "
-                                                "structure desc write, abort (NYI)");
-                                break;
-                            default:
-                                break;
-                        }
-                        writeDescriptorSets.push_back(writeDescriptorSet);
-                    }
-                }
-                std::vector<uint32_t> whichPool(poolIds.size(), 0);
-                // no need to allocate descriptors as this is not batched
-                // all the descriptors are already allocated
-                std::vector<uint32_t> pendingAlloc(poolIds.size(), false);
+//                 for (uint64_t poolId : allpoolIds) {
+//                     bool allocated = stream->getByte();
+//                     if (!allocated) {
+//                         continue;
+//                     }
+//                     GFXSTREAM_DEBUG("snapshot load: 0x%llx descriptor set for this pool",
+//                                     (unsigned long long)poolId);
+//                     poolIds.push_back(poolId);
+//                     writeStartingIndices.push_back(writeDescriptorSets.size());
+//                     VkDescriptorSetLayout boxedLayout = (VkDescriptorSetLayout)stream->getBe64();
+//                     layouts.push_back(unbox_VkDescriptorSetLayout(boxedLayout));
+//                     uint64_t validWriteCount = stream->getBe64();
+//                     for (uint64_t write = 0; write < validWriteCount; write++) {
+//                         uint32_t binding = stream->getBe32();
+//                         uint32_t arrayElement = stream->getBe32();
+//                         DescriptorSetInfo::DescriptorWriteType writeType =
+//                             static_cast<DescriptorSetInfo::DescriptorWriteType>(stream->getBe32());
+//                         VkDescriptorType descriptorType =
+//                             static_cast<VkDescriptorType>(stream->getBe32());
+//                         VkWriteDescriptorSet writeDescriptorSet = {
+//                             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+//                             .dstSet = (VkDescriptorSet)poolId,
+//                             .dstBinding = binding,
+//                             .dstArrayElement = arrayElement,
+//                             .descriptorCount = 1,
+//                             .descriptorType = descriptorType,
+//                         };
+//                         switch (writeType) {
+//                             case DescriptorSetInfo::DescriptorWriteType::ImageInfo: {
+//                                 tmpImageInfos.push_back(std::make_unique<VkDescriptorImageInfo>());
+//                                 writeDescriptorSet.pImageInfo = tmpImageInfos.back().get();
+//                                 VkDescriptorImageInfo& imageInfo = *tmpImageInfos.back();
+//                                 stream->read(&imageInfo, sizeof(imageInfo));
+//                                 imageInfo.imageView = descriptorTypeContainsImage(descriptorType)
+//                                                           ? unbox_VkImageView(imageInfo.imageView)
+//                                                           : 0;
+//                                 imageInfo.sampler = descriptorTypeContainsSampler(descriptorType)
+//                                                         ? unbox_VkSampler(imageInfo.sampler)
+//                                                         : 0;
+//                             } break;
+//                             case DescriptorSetInfo::DescriptorWriteType::BufferInfo: {
+//                                 tmpBufferInfos.push_back(
+//                                     std::make_unique<VkDescriptorBufferInfo>());
+//                                 writeDescriptorSet.pBufferInfo = tmpBufferInfos.back().get();
+//                                 VkDescriptorBufferInfo& bufferInfo = *tmpBufferInfos.back();
+//                                 stream->read(&bufferInfo, sizeof(bufferInfo));
+//                                 bufferInfo.buffer = unbox_VkBuffer(bufferInfo.buffer);
+//                             } break;
+//                             case DescriptorSetInfo::DescriptorWriteType::BufferView: {
+//                                 tmpBufferViews.push_back(std::make_unique<VkBufferView>());
+//                                 writeDescriptorSet.pTexelBufferView = tmpBufferViews.back().get();
+//                                 VkBufferView& bufferView = *tmpBufferViews.back();
+//                                 stream->read(&bufferView, sizeof(bufferView));
+//                                 bufferView = unbox_VkBufferView(bufferView);
+//                             } break;
+//                             case DescriptorSetInfo::DescriptorWriteType::InlineUniformBlock:
+//                             case DescriptorSetInfo::DescriptorWriteType::AccelerationStructure:
+//                                 // TODO
+//                                 GFXSTREAM_FATAL("Encountered pending inline uniform block or acceleration "
+//                                                 "structure desc write, abort (NYI)");
+//                                 break;
+//                             default:
+//                                 break;
+//                         }
+//                         writeDescriptorSets.push_back(writeDescriptorSet);
+//                     }
+//                 }
+//                 std::vector<uint32_t> whichPool(poolIds.size(), 0);
+//                 // no need to allocate descriptors as this is not batched
+//                 // all the descriptors are already allocated
+//                 std::vector<uint32_t> pendingAlloc(poolIds.size(), false);
 
-                const auto& device = poolInfo.device;
-                const auto& deviceInfo = gfxstream::base::find(mDeviceInfo, device);
-                VulkanDispatch* dvk = dispatch_VkDevice(deviceInfo->boxed);
-                on_vkQueueCommitDescriptorSetUpdatesGOOGLELocked(
-                    &bumpPool, kInvalidSnapshotApiCallHandle, dvk, device, 1,
-                    &unboxedDescriptorPool, poolIds.size(), layouts.data(), poolIds.data(),
-                    whichPool.data(), pendingAlloc.data(), writeStartingIndices.data(),
-                    writeDescriptorSets.size(), writeDescriptorSets.data(),
-                    needToUnboxDescriptorSet);
-            }
+//                 const auto& device = poolInfo.device;
+//                 const auto& deviceInfo = gfxstream::base::find(mDeviceInfo, device);
+//                 VulkanDispatch* dvk = dispatch_VkDevice(deviceInfo->boxed);
+//                 on_vkQueueCommitDescriptorSetUpdatesGOOGLELocked(
+//                     &bumpPool, kInvalidSnapshotApiCallHandle, dvk, device, 1,
+//                     &unboxedDescriptorPool, poolIds.size(), layouts.data(), poolIds.data(),
+//                     whichPool.data(), pendingAlloc.data(), writeStartingIndices.data(),
+//                     writeDescriptorSets.size(), writeDescriptorSets.data(),
+//                     needToUnboxDescriptorSet);
+//             }
 
-            // Fences
-            GFXSTREAM_DEBUG("snapshot load: fences");
-            uint64_t fenceCount = stream->getBe64();
-            std::vector<VkFence> unsignaledFencesBoxed(fenceCount);
-            stream->read(unsignaledFencesBoxed.data(), fenceCount * sizeof(VkFence));
-            for (VkFence boxedFence : unsignaledFencesBoxed) {
-                VkFence unboxedFence = unbox_VkFence(boxedFence);
-                auto it = mFenceInfo.find(unboxedFence);
-                if (it == mFenceInfo.end()) {
-                    GFXSTREAM_FATAL("Snapshot load failure: unrecognized VkFence");
-                }
-                const auto& device = it->second.device;
-                const auto& deviceInfo = gfxstream::base::find(mDeviceInfo, device);
-                VulkanDispatch* dvk = dispatch_VkDevice(deviceInfo->boxed);
-                dvk->vkResetFences(device, 1, &unboxedFence);
-            }
-#ifdef CONFIG_AEMU
-            if (!mInstanceInfo.empty()) {
-                get_gfxstream_vm_operations().set_snapshot_uses_vulkan();
-            }
-#endif
+//             // Fences
+//             GFXSTREAM_DEBUG("snapshot load: fences");
+//             uint64_t fenceCount = stream->getBe64();
+//             std::vector<VkFence> unsignaledFencesBoxed(fenceCount);
+//             stream->read(unsignaledFencesBoxed.data(), fenceCount * sizeof(VkFence));
+//             for (VkFence boxedFence : unsignaledFencesBoxed) {
+//                 VkFence unboxedFence = unbox_VkFence(boxedFence);
+//                 auto it = mFenceInfo.find(unboxedFence);
+//                 if (it == mFenceInfo.end()) {
+//                     GFXSTREAM_FATAL("Snapshot load failure: unrecognized VkFence");
+//                 }
+//                 const auto& device = it->second.device;
+//                 const auto& deviceInfo = gfxstream::base::find(mDeviceInfo, device);
+//                 VulkanDispatch* dvk = dispatch_VkDevice(deviceInfo->boxed);
+//                 dvk->vkResetFences(device, 1, &unboxedFence);
+//             }
+// #ifdef CONFIG_AEMU
+//             if (!mInstanceInfo.empty()) {
+//                 get_gfxstream_vm_operations().set_snapshot_uses_vulkan();
+//             }
+// #endif
 
-            // Events
-            loadEvents(stream);
+//             // Events
+//             loadEvents(stream);
 
-            // semaphores
-            loadSemaphores(stream);
+//             // semaphores
+//             loadSemaphores(stream);
 
-            mSnapshotLoadBoxedInstance2ContextId.clear();
-            mSnapshotState = SnapshotState::Normal;
-        }
-        GFXSTREAM_DEBUG("VulkanSnapshots load (end)");
-    }
+//             mSnapshotLoadBoxedInstance2ContextId.clear();
+//             mSnapshotState = SnapshotState::Normal;
+//         }
+//         GFXSTREAM_DEBUG("VulkanSnapshots load (end)");
+//     }
 
     std::optional<uint32_t> getContextIdForDeviceLocked(VkDevice device) REQUIRES(mMutex) {
         auto deviceInfoIt = mDeviceInfo.find(device);
@@ -9430,7 +9430,7 @@ class VkDecoderGlobalState::Impl {
         // if(hasWebrogueSurfaceExtension) {
         static std::vector<const char*> sWebrogueSurfaceExtensions = {
             "VK_KHR_surface",
-            "VK_KHR_xlib_surface",
+            "VK_KHR_win32_surface",
         };
         for (auto injectedExtensions : sWebrogueSurfaceExtensions) {
             res.push_back(injectedExtensions);
@@ -10423,12 +10423,12 @@ const gfxstream::host::FeatureSet& VkDecoderGlobalState::getFeatures() const { r
 
 bool VkDecoderGlobalState::vkCleanupEnabled() const { return mImpl->vkCleanupEnabled(); }
 
-void VkDecoderGlobalState::save(gfxstream::Stream* stream) { mImpl->save(stream); }
+// void VkDecoderGlobalState::save(gfxstream::Stream* stream) { mImpl->save(stream); }
 
-void VkDecoderGlobalState::load(gfxstream::Stream* stream, GfxApiLogger& gfxLogger,
-                                HealthMonitor<>* healthMonitor) {
-    mImpl->load(stream, gfxLogger, healthMonitor);
-}
+// void VkDecoderGlobalState::load(gfxstream::Stream* stream, GfxApiLogger& gfxLogger,
+//                                 HealthMonitor<>* healthMonitor) {
+//     mImpl->load(stream, gfxLogger, healthMonitor);
+// }
 
 VkResult VkDecoderGlobalState::on_vkEnumerateInstanceVersion(gfxstream::base::BumpPool* pool,
                                                              VkSnapshotApiCallHandle apiCallHandle,

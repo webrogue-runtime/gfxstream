@@ -1699,22 +1699,23 @@ void VkEmulation::initFeatures(Features features) {
     mGuestVulkanOnly = features.guestVulkanOnly;
     mUseDedicatedAllocations = features.useDedicatedAllocations;
 
-    if (features.useVulkanComposition) {
-        if (mCompositorVk) {
-            GFXSTREAM_ERROR("Reset VkEmulation::compositorVk.");
-        }
-        mCompositorVk = CompositorVk::create(*mIvk, mDevice, mPhysicalDevice, mQueue, mQueueLock,
-                                             mQueueFamilyIndex, 3, mDebugUtilsHelper);
-    }
+    abort();
+    // if (features.useVulkanComposition) {
+    //     if (mCompositorVk) {
+    //         GFXSTREAM_ERROR("Reset VkEmulation::compositorVk.");
+    //     }
+    //     mCompositorVk = CompositorVk::create(*mIvk, mDevice, mPhysicalDevice, mQueue, mQueueLock,
+    //                                          mQueueFamilyIndex, 3, mDebugUtilsHelper);
+    // }
 
-    if (features.useVulkanNativeSwapchain) {
-        if (mDisplayVk) {
-            GFXSTREAM_ERROR("Reset VkEmulation::displayVk.");
-        }
-        mDisplayVk = std::make_unique<DisplayVk>(*mIvk, mPhysicalDevice, mQueueFamilyIndex,
-                                                 mQueueFamilyIndex, mDevice, mQueue, mQueueLock,
-                                                 mQueue, mQueueLock);
-    }
+    // if (features.useVulkanNativeSwapchain) {
+    //     if (mDisplayVk) {
+    //         GFXSTREAM_ERROR("Reset VkEmulation::displayVk.");
+    //     }
+    //     mDisplayVk = std::make_unique<DisplayVk>(*mIvk, mPhysicalDevice, mQueueFamilyIndex,
+    //                                              mQueueFamilyIndex, mDevice, mQueue, mQueueLock,
+    //                                              mQueue, mQueueLock);
+    // }
 
     auto representativeInfo = findRepresentativeColorBufferMemoryTypeIndexLocked();
     if (!representativeInfo) {
@@ -1739,8 +1740,8 @@ void VkEmulation::initFeatures(Features features) {
 VkEmulation::~VkEmulation() {
     std::lock_guard<std::mutex> lock(mMutex);
 
-    mCompositorVk.reset();
-    mDisplayVk.reset();
+    // mCompositorVk.reset();
+    // mDisplayVk.reset();
     mUdmabufCreator.reset();
 
     mStaging.destroy(mDvk, mDevice);
@@ -1836,9 +1837,9 @@ gfxstream::host::RenderDocWithMultipleVkInstances* VkEmulation::getRenderDoc() {
     return mGuestRenderDoc.get();
 }
 
-Compositor* VkEmulation::getCompositor() { return mCompositorVk.get(); }
+// Compositor* VkEmulation::getCompositor() { return mCompositorVk.get(); }
 
-DisplayVk* VkEmulation::getDisplay() { return mDisplayVk.get(); }
+// DisplayVk* VkEmulation::getDisplay() { return mDisplayVk.get(); }
 
 UdmabufCreator* VkEmulation::getUdmabufCreator() { return mUdmabufCreator.get(); }
 
@@ -1912,16 +1913,16 @@ RepresentativeColorBufferMemoryTypeInfo VkEmulation::getRepresentativeColorBuffe
 
 void VkEmulation::onVkDeviceLost() { VkDecoderGlobalState::get()->on_DeviceLost(); }
 
-std::unique_ptr<gfxstream::DisplaySurface> VkEmulation::createDisplaySurface(
-    FBNativeWindowType window, uint32_t width, uint32_t height) {
-    auto surfaceVk = DisplaySurfaceVk::create(*mIvk, mInstance, window);
-    if (!surfaceVk) {
-        GFXSTREAM_ERROR("Failed to create DisplaySurfaceVk.");
-        return nullptr;
-    }
+// std::unique_ptr<gfxstream::DisplaySurface> VkEmulation::createDisplaySurface(
+//     FBNativeWindowType window, uint32_t width, uint32_t height) {
+//     auto surfaceVk = DisplaySurfaceVk::create(*mIvk, mInstance, window);
+//     if (!surfaceVk) {
+//         GFXSTREAM_ERROR("Failed to create DisplaySurfaceVk.");
+//         return nullptr;
+//     }
 
-    return std::make_unique<gfxstream::DisplaySurface>(width, height, std::move(surfaceVk));
-}
+//     return std::make_unique<gfxstream::DisplaySurface>(width, height, std::move(surfaceVk));
+// }
 
 #ifdef __APPLE__
 MTLResource_id VkEmulation::getMtlResourceFromVkDeviceMemory(VulkanDispatch* vk,
@@ -3042,36 +3043,37 @@ bool VkEmulation::colorBufferNeedsUpdateBetweenGlAndVk(uint32_t colorBufferHandl
 bool VkEmulation::readColorBufferToBytes(uint32_t colorBufferHandle, std::vector<uint8_t>* bytes) {
     std::lock_guard<std::mutex> lock(mMutex);
 
+    abort();
     auto colorBufferInfo = gfxstream::base::find(mColorBuffers, colorBufferHandle);
-    if (!colorBufferInfo) {
-        GFXSTREAM_DEBUG("Failed to read from ColorBuffer:%d, not found.", colorBufferHandle);
-        bytes->clear();
-        return false;
-    }
+    // if (!colorBufferInfo) {
+    //     GFXSTREAM_DEBUG("Failed to read from ColorBuffer:%d, not found.", colorBufferHandle);
+    //     bytes->clear();
+    //     return false;
+    // }
 
-    VkDeviceSize bytesNeeded = 0;
-    bool result = getFormatTransferInfo(colorBufferInfo->imageCreateInfoShallow.format,
-                                        colorBufferInfo->imageCreateInfoShallow.extent.width,
-                                        colorBufferInfo->imageCreateInfoShallow.extent.height,
-                                        &bytesNeeded, nullptr);
-    if (!result) {
-        GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, failed to get read size.",
-                        colorBufferHandle);
-        return false;
-    }
+    // VkDeviceSize bytesNeeded = 0;
+    // bool result = getFormatTransferInfo(colorBufferInfo->imageCreateInfoShallow.format,
+    //                                     colorBufferInfo->imageCreateInfoShallow.extent.width,
+    //                                     colorBufferInfo->imageCreateInfoShallow.extent.height,
+    //                                     &bytesNeeded, nullptr);
+    // if (!result) {
+    //     GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, failed to get read size.",
+    //                     colorBufferHandle);
+    //     return false;
+    // }
 
-    bytes->resize(bytesNeeded);
+    // bytes->resize(bytesNeeded);
 
-    result = readColorBufferToBytesLocked(
-        colorBufferHandle, 0, 0, colorBufferInfo->imageCreateInfoShallow.extent.width,
-        colorBufferInfo->imageCreateInfoShallow.extent.height, bytes->data(), bytes->size());
-    if (!result) {
-        GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, failed to get read size.",
-                        colorBufferHandle);
-        return false;
-    }
+    // result = readColorBufferToBytesLocked(
+    //     colorBufferHandle, 0, 0, colorBufferInfo->imageCreateInfoShallow.extent.width,
+    //     colorBufferInfo->imageCreateInfoShallow.extent.height, bytes->data(), bytes->size());
+    // if (!result) {
+    //     GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, failed to get read size.",
+    //                     colorBufferHandle);
+    //     return false;
+    // }
 
-    return true;
+    // return true;
 }
 
 bool VkEmulation::readColorBufferToBytes(uint32_t colorBufferHandle, uint32_t x, uint32_t y,
@@ -3084,181 +3086,182 @@ bool VkEmulation::readColorBufferToBytes(uint32_t colorBufferHandle, uint32_t x,
 bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint32_t x, uint32_t y,
                                                uint32_t w, uint32_t h, void* outPixels,
                                                uint64_t outPixelsSize) {
-    auto vk = mDvk;
+    abort();
+    // auto vk = mDvk;
 
-    auto colorBufferInfo = gfxstream::base::find(mColorBuffers, colorBufferHandle);
-    if (!colorBufferInfo) {
-        GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, not found.", colorBufferHandle);
-        return false;
-    }
+    // auto colorBufferInfo = gfxstream::base::find(mColorBuffers, colorBufferHandle);
+    // if (!colorBufferInfo) {
+    //     GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, not found.", colorBufferHandle);
+    //     return false;
+    // }
 
-    if (!colorBufferInfo->image) {
-        GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, no VkImage.", colorBufferHandle);
-        return false;
-    }
+    // if (!colorBufferInfo->image) {
+    //     GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, no VkImage.", colorBufferHandle);
+    //     return false;
+    // }
 
-    if (x != 0 || y != 0 || w != colorBufferInfo->imageCreateInfoShallow.extent.width ||
-        h != colorBufferInfo->imageCreateInfoShallow.extent.height) {
-        GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, unhandled subrect.",
-                        colorBufferHandle);
-        return false;
-    }
+    // if (x != 0 || y != 0 || w != colorBufferInfo->imageCreateInfoShallow.extent.width ||
+    //     h != colorBufferInfo->imageCreateInfoShallow.extent.height) {
+    //     GFXSTREAM_ERROR("Failed to read from ColorBuffer:%d, unhandled subrect.",
+    //                     colorBufferHandle);
+    //     return false;
+    // }
 
-    VkDeviceSize bufferCopySize = 0;
-    std::vector<VkBufferImageCopy> bufferImageCopies;
-    if (!getFormatTransferInfo(colorBufferInfo->imageCreateInfoShallow.format,
-                               colorBufferInfo->imageCreateInfoShallow.extent.width,
-                               colorBufferInfo->imageCreateInfoShallow.extent.height,
-                               &bufferCopySize, &bufferImageCopies)) {
-        GFXSTREAM_ERROR("Failed to read ColorBuffer:%d, unable to get transfer info.",
-                        colorBufferHandle);
-        return false;
-    }
+    // VkDeviceSize bufferCopySize = 0;
+    // std::vector<VkBufferImageCopy> bufferImageCopies;
+    // if (!getFormatTransferInfo(colorBufferInfo->imageCreateInfoShallow.format,
+    //                            colorBufferInfo->imageCreateInfoShallow.extent.width,
+    //                            colorBufferInfo->imageCreateInfoShallow.extent.height,
+    //                            &bufferCopySize, &bufferImageCopies)) {
+    //     GFXSTREAM_ERROR("Failed to read ColorBuffer:%d, unable to get transfer info.",
+    //                     colorBufferHandle);
+    //     return false;
+    // }
 
-    // Avoid transitioning from VK_IMAGE_LAYOUT_UNDEFINED. Unfortunetly, Android does not
-    // yet have a mechanism for sharing the expected VkImageLayout. However, the Vulkan
-    // spec's image layout transition sections says "If the old layout is
-    // VK_IMAGE_LAYOUT_UNDEFINED, the contents of that range may be discarded." Some
-    // Vulkan drivers have been observed to actually perform the discard which leads to
-    // ColorBuffer-s being unintentionally cleared. See go/ahb-vkimagelayout for a more
-    // thorough write up.
-    if (colorBufferInfo->currentLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
-        colorBufferInfo->currentLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    }
+    // // Avoid transitioning from VK_IMAGE_LAYOUT_UNDEFINED. Unfortunetly, Android does not
+    // // yet have a mechanism for sharing the expected VkImageLayout. However, the Vulkan
+    // // spec's image layout transition sections says "If the old layout is
+    // // VK_IMAGE_LAYOUT_UNDEFINED, the contents of that range may be discarded." Some
+    // // Vulkan drivers have been observed to actually perform the discard which leads to
+    // // ColorBuffer-s being unintentionally cleared. See go/ahb-vkimagelayout for a more
+    // // thorough write up.
+    // if (colorBufferInfo->currentLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+    //     colorBufferInfo->currentLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    // }
 
-    // Record our synchronization commands.
-    const VkCommandBufferBeginInfo beginInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = nullptr,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    VK_CHECK(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo));
+    // // Record our synchronization commands.
+    // const VkCommandBufferBeginInfo beginInfo = {
+    //     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    //     .pNext = nullptr,
+    //     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    // };
+    // VK_CHECK(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo));
 
-    mDebugUtilsHelper.cmdBeginDebugLabel(mCommandBuffer, "readColorBufferToBytes(ColorBuffer:%d)",
-                                         colorBufferHandle);
+    // mDebugUtilsHelper.cmdBeginDebugLabel(mCommandBuffer, "readColorBufferToBytes(ColorBuffer:%d)",
+    //                                      colorBufferHandle);
 
-    const VkImageLayout currentLayout = colorBufferInfo->currentLayout;
-    const VkImageLayout transferSrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    // const VkImageLayout currentLayout = colorBufferInfo->currentLayout;
+    // const VkImageLayout transferSrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
-    const VkImageMemoryBarrier toTransferSrcImageBarrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-        .oldLayout = currentLayout,
-        .newLayout = transferSrcLayout,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = colorBufferInfo->image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-    };
+    // const VkImageMemoryBarrier toTransferSrcImageBarrier = {
+    //     .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    //     .pNext = nullptr,
+    //     .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+    //     .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+    //     .oldLayout = currentLayout,
+    //     .newLayout = transferSrcLayout,
+    //     .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    //     .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    //     .image = colorBufferInfo->image,
+    //     .subresourceRange =
+    //         {
+    //             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    //             .baseMipLevel = 0,
+    //             .levelCount = 1,
+    //             .baseArrayLayer = 0,
+    //             .layerCount = 1,
+    //         },
+    // };
 
-    vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1,
-                             &toTransferSrcImageBarrier);
+    // vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+    //                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1,
+    //                          &toTransferSrcImageBarrier);
 
-    vk->vkCmdCopyImageToBuffer(mCommandBuffer, colorBufferInfo->image,
-                               transferSrcLayout, mStaging.mBuffer,
-                               bufferImageCopies.size(), bufferImageCopies.data());
+    // vk->vkCmdCopyImageToBuffer(mCommandBuffer, colorBufferInfo->image,
+    //                            transferSrcLayout, mStaging.mBuffer,
+    //                            bufferImageCopies.size(), bufferImageCopies.data());
 
-    // Change back to original layout
-    if (currentLayout != VK_IMAGE_LAYOUT_UNDEFINED) {
-        // Transfer back to original layout.
-        const VkImageMemoryBarrier toCurrentLayoutImageBarrier = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_HOST_READ_BIT,
-            .dstAccessMask = VK_ACCESS_NONE_KHR,
-            .oldLayout = transferSrcLayout,
-            .newLayout = colorBufferInfo->currentLayout,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = colorBufferInfo->image,
-            .subresourceRange =
-                {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = 1,
-                },
-        };
-        vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1,
-                                 &toCurrentLayoutImageBarrier);
-    } else {
-        colorBufferInfo->currentLayout = transferSrcLayout;
-    }
+    // // Change back to original layout
+    // if (currentLayout != VK_IMAGE_LAYOUT_UNDEFINED) {
+    //     // Transfer back to original layout.
+    //     const VkImageMemoryBarrier toCurrentLayoutImageBarrier = {
+    //         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    //         .pNext = nullptr,
+    //         .srcAccessMask = VK_ACCESS_HOST_READ_BIT,
+    //         .dstAccessMask = VK_ACCESS_NONE_KHR,
+    //         .oldLayout = transferSrcLayout,
+    //         .newLayout = colorBufferInfo->currentLayout,
+    //         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    //         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    //         .image = colorBufferInfo->image,
+    //         .subresourceRange =
+    //             {
+    //                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    //                 .baseMipLevel = 0,
+    //                 .levelCount = 1,
+    //                 .baseArrayLayer = 0,
+    //                 .layerCount = 1,
+    //             },
+    //     };
+    //     vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+    //                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1,
+    //                              &toCurrentLayoutImageBarrier);
+    // } else {
+    //     colorBufferInfo->currentLayout = transferSrcLayout;
+    // }
 
-    mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
+    // mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
 
-    VK_CHECK(vk->vkEndCommandBuffer(mCommandBuffer));
+    // VK_CHECK(vk->vkEndCommandBuffer(mCommandBuffer));
 
-    const VkSubmitInfo submitInfo = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext = nullptr,
-        .waitSemaphoreCount = 0,
-        .pWaitSemaphores = nullptr,
-        .pWaitDstStageMask = nullptr,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &mCommandBuffer,
-        .signalSemaphoreCount = 0,
-        .pSignalSemaphores = nullptr,
-    };
+    // const VkSubmitInfo submitInfo = {
+    //     .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+    //     .pNext = nullptr,
+    //     .waitSemaphoreCount = 0,
+    //     .pWaitSemaphores = nullptr,
+    //     .pWaitDstStageMask = nullptr,
+    //     .commandBufferCount = 1,
+    //     .pCommandBuffers = &mCommandBuffer,
+    //     .signalSemaphoreCount = 0,
+    //     .pSignalSemaphores = nullptr,
+    // };
 
-    {
-        gfxstream::base::AutoLock queueLock(*mQueueLock);
-        VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence));
-    }
+    // {
+    //     gfxstream::base::AutoLock queueLock(*mQueueLock);
+    //     VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence));
+    // }
 
-    static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
-    VkResult waitRes =
-        vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS);
-    if (waitRes == VK_TIMEOUT) {
-        // Give a warning and try once more on a timeout error
-        GFXSTREAM_ERROR(
-            "readColorBufferToBytesLocked vkWaitForFences failed with timeout error "
-            "(cb:%d, x:%d, y:%d, w:%d, h:%d, bufferCopySize:%llu), retrying...",
-            colorBufferHandle, x, y, w, h, bufferCopySize);
-        waitRes =
-            vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS * 2);
-    }
+    // static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+    // VkResult waitRes =
+    //     vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS);
+    // if (waitRes == VK_TIMEOUT) {
+    //     // Give a warning and try once more on a timeout error
+    //     GFXSTREAM_ERROR(
+    //         "readColorBufferToBytesLocked vkWaitForFences failed with timeout error "
+    //         "(cb:%d, x:%d, y:%d, w:%d, h:%d, bufferCopySize:%llu), retrying...",
+    //         colorBufferHandle, x, y, w, h, bufferCopySize);
+    //     waitRes =
+    //         vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS * 2);
+    // }
 
-    VK_CHECK(waitRes);
+    // VK_CHECK(waitRes);
 
-    VK_CHECK(vk->vkResetFences(mDevice, 1, &mCommandBufferFence));
+    // VK_CHECK(vk->vkResetFences(mDevice, 1, &mCommandBufferFence));
 
-    if (!mStaging.mIsHostCoherent) {
-        // Invalidate host cache lines to ensure the subsequent readback
-        // will see the latest writes made by the GPU.
-        const VkMappedMemoryRange toInvalidate = {
-            .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-            .pNext = nullptr,
-            .memory = mStaging.mMemory,
-            .offset = 0,
-            .size = VK_WHOLE_SIZE,
-        };
+    // if (!mStaging.mIsHostCoherent) {
+    //     // Invalidate host cache lines to ensure the subsequent readback
+    //     // will see the latest writes made by the GPU.
+    //     const VkMappedMemoryRange toInvalidate = {
+    //         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+    //         .pNext = nullptr,
+    //         .memory = mStaging.mMemory,
+    //         .offset = 0,
+    //         .size = VK_WHOLE_SIZE,
+    //     };
 
-        VK_CHECK(vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate));
-    }
+    //     VK_CHECK(vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate));
+    // }
 
-    if (bufferCopySize > outPixelsSize) {
-        GFXSTREAM_ERROR(
-            "Invalid buffer size for readColorBufferToBytes operation."
-            "Required: %llu, Actual: %llu",
-            bufferCopySize, outPixelsSize);
-        bufferCopySize = outPixelsSize;
-    }
-    std::memcpy(outPixels, mStaging.mMappedPtr, bufferCopySize);
+    // if (bufferCopySize > outPixelsSize) {
+    //     GFXSTREAM_ERROR(
+    //         "Invalid buffer size for readColorBufferToBytes operation."
+    //         "Required: %llu, Actual: %llu",
+    //         bufferCopySize, outPixelsSize);
+    //     bufferCopySize = outPixelsSize;
+    // }
+    // std::memcpy(outPixels, mStaging.mMappedPtr, bufferCopySize);
 
-    return true;
+    // return true;
 }
 
 bool VkEmulation::updateColorBufferFromBytes(uint32_t colorBufferHandle,
@@ -3311,190 +3314,191 @@ static void convertRgba4ToBGRA4Pixels(void* dst, const void* src, uint32_t w, ui
 bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, uint32_t x,
                                                    uint32_t y, uint32_t w, uint32_t h,
                                                    const void* pixels, size_t inputPixelsSize) {
-    auto vk = mDvk;
+    abort();
+    // auto vk = mDvk;
 
-    auto colorBufferInfo = gfxstream::base::find(mColorBuffers, colorBufferHandle);
-    if (!colorBufferInfo) {
-        GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, not found.", colorBufferHandle);
-        return false;
-    }
+    // auto colorBufferInfo = gfxstream::base::find(mColorBuffers, colorBufferHandle);
+    // if (!colorBufferInfo) {
+    //     GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, not found.", colorBufferHandle);
+    //     return false;
+    // }
 
-    if (!colorBufferInfo->image) {
-        GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, no VkImage.", colorBufferHandle);
-        return false;
-    }
+    // if (!colorBufferInfo->image) {
+    //     GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, no VkImage.", colorBufferHandle);
+    //     return false;
+    // }
 
-    if (x != 0 || y != 0 || w != colorBufferInfo->imageCreateInfoShallow.extent.width ||
-        h != colorBufferInfo->imageCreateInfoShallow.extent.height) {
-        GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, unhandled subrect.", colorBufferHandle);
-        return false;
-    }
+    // if (x != 0 || y != 0 || w != colorBufferInfo->imageCreateInfoShallow.extent.width ||
+    //     h != colorBufferInfo->imageCreateInfoShallow.extent.height) {
+    //     GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, unhandled subrect.", colorBufferHandle);
+    //     return false;
+    // }
 
-    const VkFormat creationFormat = colorBufferInfo->imageCreateInfoShallow.format;
-    VkDeviceSize dstBufferSize = 0;
-    std::vector<VkBufferImageCopy> bufferImageCopies;
-    if (!getFormatTransferInfo(creationFormat,
-                               colorBufferInfo->imageCreateInfoShallow.extent.width,
-                               colorBufferInfo->imageCreateInfoShallow.extent.height,
-                               &dstBufferSize, &bufferImageCopies)) {
-        GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, unable to get transfer info.",
-                        colorBufferHandle);
-        return false;
-    }
+    // const VkFormat creationFormat = colorBufferInfo->imageCreateInfoShallow.format;
+    // VkDeviceSize dstBufferSize = 0;
+    // std::vector<VkBufferImageCopy> bufferImageCopies;
+    // if (!getFormatTransferInfo(creationFormat,
+    //                            colorBufferInfo->imageCreateInfoShallow.extent.width,
+    //                            colorBufferInfo->imageCreateInfoShallow.extent.height,
+    //                            &dstBufferSize, &bufferImageCopies)) {
+    //     GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, unable to get transfer info.",
+    //                     colorBufferHandle);
+    //     return false;
+    // }
 
-    const VkDeviceSize stagingBufferSize = mStaging.mAllocationSize;
-    if (dstBufferSize > stagingBufferSize) {
-        GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, transfer size %" PRIu64
-                        " too large for staging buffer size:%" PRIu64 ".",
-                        colorBufferHandle, dstBufferSize, stagingBufferSize);
-        return false;
-    }
-    const bool isRGBA4onBGRA4 = (colorBufferInfo->internalFormat == GL_RGBA4_OES) &&
-                          (creationFormat == VK_FORMAT_B4G4R4A4_UNORM_PACK16);
-    const bool isThreeByteRgb =
-        (colorBufferInfo->internalFormat == GL_RGB || colorBufferInfo->internalFormat == GL_RGB8);
-    const size_t expectedInputSize = (isThreeByteRgb ? dstBufferSize / 4 * 3 : dstBufferSize);
+    // const VkDeviceSize stagingBufferSize = mStaging.mAllocationSize;
+    // if (dstBufferSize > stagingBufferSize) {
+    //     GFXSTREAM_ERROR("Failed to update ColorBuffer:%d, transfer size %" PRIu64
+    //                     " too large for staging buffer size:%" PRIu64 ".",
+    //                     colorBufferHandle, dstBufferSize, stagingBufferSize);
+    //     return false;
+    // }
+    // const bool isRGBA4onBGRA4 = (colorBufferInfo->internalFormat == GL_RGBA4_OES) &&
+    //                       (creationFormat == VK_FORMAT_B4G4R4A4_UNORM_PACK16);
+    // const bool isThreeByteRgb =
+    //     (colorBufferInfo->internalFormat == GL_RGB || colorBufferInfo->internalFormat == GL_RGB8);
+    // const size_t expectedInputSize = (isThreeByteRgb ? dstBufferSize / 4 * 3 : dstBufferSize);
 
-    if (inputPixelsSize != 0 && inputPixelsSize != expectedInputSize) {
-        GFXSTREAM_ERROR(
-            "Unexpected contents size when trying to update ColorBuffer:%d, "
-            "provided:%zu expected:%zu",
-            colorBufferHandle, inputPixelsSize, expectedInputSize);
-        return false;
-    }
+    // if (inputPixelsSize != 0 && inputPixelsSize != expectedInputSize) {
+    //     GFXSTREAM_ERROR(
+    //         "Unexpected contents size when trying to update ColorBuffer:%d, "
+    //         "provided:%zu expected:%zu",
+    //         colorBufferHandle, inputPixelsSize, expectedInputSize);
+    //     return false;
+    // }
 
-    // Copy the data into the staging memory first, then use vkCmdCopyBufferToImage
-    // to update the color buffer image.
-    auto* stagingBufferPtr = mStaging.mMappedPtr;
-    if (isThreeByteRgb) {
-        // Convert RGB to RGBA, since only for these types glFormat2VkFormat() makes
-        // an incompatible choice of 4-byte backing VK_FORMAT_R8G8B8A8_UNORM.
-        // b/281550953
-        convertRgbToRgbaPixels(stagingBufferPtr, pixels, w, h);
-    } else if(isRGBA4onBGRA4) {
-        convertRgba4ToBGRA4Pixels(stagingBufferPtr, pixels, w, h);
-    } else {
-        std::memcpy(stagingBufferPtr, pixels, dstBufferSize);
-    }
+    // // Copy the data into the staging memory first, then use vkCmdCopyBufferToImage
+    // // to update the color buffer image.
+    // auto* stagingBufferPtr = mStaging.mMappedPtr;
+    // if (isThreeByteRgb) {
+    //     // Convert RGB to RGBA, since only for these types glFormat2VkFormat() makes
+    //     // an incompatible choice of 4-byte backing VK_FORMAT_R8G8B8A8_UNORM.
+    //     // b/281550953
+    //     convertRgbToRgbaPixels(stagingBufferPtr, pixels, w, h);
+    // } else if(isRGBA4onBGRA4) {
+    //     convertRgba4ToBGRA4Pixels(stagingBufferPtr, pixels, w, h);
+    // } else {
+    //     std::memcpy(stagingBufferPtr, pixels, dstBufferSize);
+    // }
 
-    if (!mStaging.mIsHostCoherent) {
-        // Flush writes manually now if the memory is not coherent
-        const VkMappedMemoryRange flushRange = {
-            VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, 0,
-            mStaging.mMemory, 0, VK_WHOLE_SIZE
-        };
-        VK_CHECK(vk->vkFlushMappedMemoryRanges(mDevice, 1, &flushRange));
-    }
+    // if (!mStaging.mIsHostCoherent) {
+    //     // Flush writes manually now if the memory is not coherent
+    //     const VkMappedMemoryRange flushRange = {
+    //         VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, 0,
+    //         mStaging.mMemory, 0, VK_WHOLE_SIZE
+    //     };
+    //     VK_CHECK(vk->vkFlushMappedMemoryRanges(mDevice, 1, &flushRange));
+    // }
 
-    // NOTE: Host vulkan state might not know the correct layout of the
-    // destination image, as guest grallocs are designed to be used by either
-    // GL or Vulkan. Consequently, we typically avoid image transitions from
-    // VK_IMAGE_LAYOUT_UNDEFINED as Vulkan spec allows the contents to be
-    // discarded (and some drivers have been observed doing it). You can
-    // check go/ahb-vkimagelayout for more information. But since this
-    // function does not allow subrects (see above), it will write the
-    // provided contents onto the entirety of the target buffer, meaning this
-    // risk of discarding data should not impact anything.
+    // // NOTE: Host vulkan state might not know the correct layout of the
+    // // destination image, as guest grallocs are designed to be used by either
+    // // GL or Vulkan. Consequently, we typically avoid image transitions from
+    // // VK_IMAGE_LAYOUT_UNDEFINED as Vulkan spec allows the contents to be
+    // // discarded (and some drivers have been observed doing it). You can
+    // // check go/ahb-vkimagelayout for more information. But since this
+    // // function does not allow subrects (see above), it will write the
+    // // provided contents onto the entirety of the target buffer, meaning this
+    // // risk of discarding data should not impact anything.
 
-    // Record our synchronization commands.
-    const VkCommandBufferBeginInfo beginInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = nullptr,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    VK_CHECK(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo));
+    // // Record our synchronization commands.
+    // const VkCommandBufferBeginInfo beginInfo = {
+    //     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    //     .pNext = nullptr,
+    //     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    // };
+    // VK_CHECK(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo));
 
-    mDebugUtilsHelper.cmdBeginDebugLabel(
-        mCommandBuffer, "updateColorBufferFromBytes(ColorBuffer:%d)", colorBufferHandle);
+    // mDebugUtilsHelper.cmdBeginDebugLabel(
+    //     mCommandBuffer, "updateColorBufferFromBytes(ColorBuffer:%d)", colorBufferHandle);
 
-    const bool isSnapshotLoad = VkDecoderGlobalState::get()->isSnapshotCurrentlyLoading();
-    VkImageLayout currentLayout = colorBufferInfo->currentLayout;
-    if (isSnapshotLoad) {
-        currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    }
-    const VkImageMemoryBarrier toTransferDstImageBarrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
-        .oldLayout = currentLayout,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = colorBufferInfo->image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-    };
+    // const bool isSnapshotLoad = VkDecoderGlobalState::get()->isSnapshotCurrentlyLoading();
+    // VkImageLayout currentLayout = colorBufferInfo->currentLayout;
+    // if (isSnapshotLoad) {
+    //     currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // }
+    // const VkImageMemoryBarrier toTransferDstImageBarrier = {
+    //     .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    //     .pNext = nullptr,
+    //     .srcAccessMask = 0,
+    //     .dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+    //     .oldLayout = currentLayout,
+    //     .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    //     .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    //     .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    //     .image = colorBufferInfo->image,
+    //     .subresourceRange =
+    //         {
+    //             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    //             .baseMipLevel = 0,
+    //             .levelCount = 1,
+    //             .baseArrayLayer = 0,
+    //             .layerCount = 1,
+    //         },
+    // };
 
-    vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
-                             &toTransferDstImageBarrier);
+    // vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    //                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+    //                          &toTransferDstImageBarrier);
 
-    // Copy from staging buffer to color buffer image
-    vk->vkCmdCopyBufferToImage(mCommandBuffer, mStaging.mBuffer, colorBufferInfo->image,
-                               toTransferDstImageBarrier.newLayout, bufferImageCopies.size(),
-                               bufferImageCopies.data());
+    // // Copy from staging buffer to color buffer image
+    // vk->vkCmdCopyBufferToImage(mCommandBuffer, mStaging.mBuffer, colorBufferInfo->image,
+    //                            toTransferDstImageBarrier.newLayout, bufferImageCopies.size(),
+    //                            bufferImageCopies.data());
 
-    if (colorBufferInfo->currentLayout != VK_IMAGE_LAYOUT_UNDEFINED) {
-        const VkImageMemoryBarrier toCurrentLayoutImageBarrier = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = toTransferDstImageBarrier.dstAccessMask,
-            .dstAccessMask = VK_ACCESS_NONE_KHR,
-            .oldLayout = toTransferDstImageBarrier.newLayout,
-            .newLayout = colorBufferInfo->currentLayout,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = colorBufferInfo->image,
-            .subresourceRange =
-                {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = 1,
-                },
-        };
-        vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1,
-                                 &toCurrentLayoutImageBarrier);
-    } else {
-        colorBufferInfo->currentLayout = toTransferDstImageBarrier.newLayout;
-    }
+    // if (colorBufferInfo->currentLayout != VK_IMAGE_LAYOUT_UNDEFINED) {
+    //     const VkImageMemoryBarrier toCurrentLayoutImageBarrier = {
+    //         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    //         .pNext = nullptr,
+    //         .srcAccessMask = toTransferDstImageBarrier.dstAccessMask,
+    //         .dstAccessMask = VK_ACCESS_NONE_KHR,
+    //         .oldLayout = toTransferDstImageBarrier.newLayout,
+    //         .newLayout = colorBufferInfo->currentLayout,
+    //         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    //         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    //         .image = colorBufferInfo->image,
+    //         .subresourceRange =
+    //             {
+    //                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    //                 .baseMipLevel = 0,
+    //                 .levelCount = 1,
+    //                 .baseArrayLayer = 0,
+    //                 .layerCount = 1,
+    //             },
+    //     };
+    //     vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+    //                              VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1,
+    //                              &toCurrentLayoutImageBarrier);
+    // } else {
+    //     colorBufferInfo->currentLayout = toTransferDstImageBarrier.newLayout;
+    // }
 
-    mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
+    // mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
 
-    VK_CHECK(vk->vkEndCommandBuffer(mCommandBuffer));
+    // VK_CHECK(vk->vkEndCommandBuffer(mCommandBuffer));
 
-    const VkSubmitInfo submitInfo = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext = nullptr,
-        .waitSemaphoreCount = 0,
-        .pWaitSemaphores = nullptr,
-        .pWaitDstStageMask = nullptr,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &mCommandBuffer,
-        .signalSemaphoreCount = 0,
-        .pSignalSemaphores = nullptr,
-    };
+    // const VkSubmitInfo submitInfo = {
+    //     .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+    //     .pNext = nullptr,
+    //     .waitSemaphoreCount = 0,
+    //     .pWaitSemaphores = nullptr,
+    //     .pWaitDstStageMask = nullptr,
+    //     .commandBufferCount = 1,
+    //     .pCommandBuffers = &mCommandBuffer,
+    //     .signalSemaphoreCount = 0,
+    //     .pSignalSemaphores = nullptr,
+    // };
 
-    {
-        gfxstream::base::AutoLock queueLock(*mQueueLock);
-        VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence));
-    }
+    // {
+    //     gfxstream::base::AutoLock queueLock(*mQueueLock);
+    //     VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence));
+    // }
 
-    static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
-    VK_CHECK(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS));
+    // static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+    // VK_CHECK(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS));
 
-    VK_CHECK(vk->vkResetFences(mDevice, 1, &mCommandBufferFence));
+    // VK_CHECK(vk->vkResetFences(mDevice, 1, &mCommandBufferFence));
 
-    return true;
+    // return true;
 }
 
 std::optional<ExternalHandleInfo> VkEmulation::dupColorBufferExtMemoryHandle(
@@ -4296,21 +4300,22 @@ std::unique_ptr<BorrowedImageInfoVk> VkEmulation::borrowColorBufferForCompositio
     compositorInfo->imageCreateInfo = colorBufferInfo->imageCreateInfoShallow;
     compositorInfo->preBorrowLayout = colorBufferInfo->currentLayout;
     compositorInfo->preBorrowQueueFamilyIndex = colorBufferInfo->currentQueueFamilyIndex;
-    if (colorBufferIsTarget && mDisplayVk) {
-        // Instruct the compositor to perform the layout transition after use so
-        // that it is ready to be blitted to the display.
-        compositorInfo->postBorrowQueueFamilyIndex = mQueueFamilyIndex;
-        compositorInfo->postBorrowLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    } else {
-        // Instruct the compositor to perform the queue transfer release after use
-        // so that the color buffer can be acquired by the guest.
-        compositorInfo->postBorrowQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
-        compositorInfo->postBorrowLayout = colorBufferInfo->currentLayout;
+    // if (colorBufferIsTarget && mDisplayVk) {
+    //     // Instruct the compositor to perform the layout transition after use so
+    //     // that it is ready to be blitted to the display.
+    //     compositorInfo->postBorrowQueueFamilyIndex = mQueueFamilyIndex;
+    //     compositorInfo->postBorrowLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    // } else {
+    //     // Instruct the compositor to perform the queue transfer release after use
+    //     // so that the color buffer can be acquired by the guest.
+    //     compositorInfo->postBorrowQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+    //     compositorInfo->postBorrowLayout = colorBufferInfo->currentLayout;
 
-        if (compositorInfo->postBorrowLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
-            compositorInfo->postBorrowLayout = kGuestUseDefaultImageLayout;
-        }
-    }
+    //     if (compositorInfo->postBorrowLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+    //         compositorInfo->postBorrowLayout = kGuestUseDefaultImageLayout;
+    //     }
+    // }
+    abort();
 
     colorBufferInfo->currentLayout = compositorInfo->postBorrowLayout;
     colorBufferInfo->currentQueueFamilyIndex = compositorInfo->postBorrowQueueFamilyIndex;

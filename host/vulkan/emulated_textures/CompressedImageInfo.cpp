@@ -795,6 +795,9 @@ VkExtent3D CompressedImageInfo::compressedMipmapExtent(uint32_t level) const {
     return result;
 }
 
+#ifdef min
+#undef min
+#endif
 VkExtent3D CompressedImageInfo::compressedMipmapPortion(const VkExtent3D& origExtent,
                                                         uint32_t level) const {
     VkExtent3D maxExtent = compressedMipmapExtent(level);

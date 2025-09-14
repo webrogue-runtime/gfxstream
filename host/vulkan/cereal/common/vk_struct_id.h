@@ -24,7 +24,7 @@
 #include "vulkan_gfxstream_structure_type.h"
 
 template <class T>
-struct vk_get_vk_struct_id;
+struct vk_get_vk_struct_id {};
 
 #define REGISTER_VK_STRUCT_ID(T, ID)              \
     template <>                                   \

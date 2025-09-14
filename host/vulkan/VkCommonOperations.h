@@ -156,9 +156,9 @@ class VkEmulation {
 
     gfxstream::host::RenderDocWithMultipleVkInstances* getRenderDoc();
 
-    Compositor* getCompositor();
+    // Compositor* getCompositor();
 
-    DisplayVk* getDisplay();
+    // DisplayVk* getDisplay();
 
     UdmabufCreator* getUdmabufCreator();
 
@@ -179,9 +179,9 @@ class VkEmulation {
 
     VkExternalMemoryHandleTypeFlagBits getDefaultExternalMemoryHandleType();
 
-    std::unique_ptr<gfxstream::DisplaySurface> createDisplaySurface(FBNativeWindowType window,
-                                                                    uint32_t width,
-                                                                    uint32_t height);
+    // std::unique_ptr<gfxstream::DisplaySurface> createDisplaySurface(FBNativeWindowType window,
+    //                                                                 uint32_t width,
+    //                                                                 uint32_t height);
 
     // ColorBuffer operations
 
@@ -670,11 +670,11 @@ class VkEmulation {
     // signaled only if the command buffer completes.
     std::vector<std::tuple<VkCommandBuffer, VkFence>> mTransferQueueCommandBufferPool GUARDED_BY(mMutex);
 
-    std::unique_ptr<CompositorVk> mCompositorVk;
+    // std::unique_ptr<CompositorVk> mCompositorVk;
 
     // The implementation for Vulkan native swapchain. Only initialized in initVkEmulationFeatures
     // if useVulkanNativeSwapchain is set.
-    std::unique_ptr<DisplayVk> mDisplayVk;
+    // std::unique_ptr<DisplayVk> mDisplayVk;
 
     // UdmabufCreator
     std::unique_ptr<UdmabufCreator> mUdmabufCreator;

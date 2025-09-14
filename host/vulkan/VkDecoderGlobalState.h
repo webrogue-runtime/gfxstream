@@ -88,10 +88,10 @@ class VkDecoderGlobalState {
     // bug 149997534
     bool vkCleanupEnabled() const;
 
-    void save(gfxstream::Stream* stream);
-    void load(gfxstream::Stream* stream,
-              gfxstream::host::GfxApiLogger& gfxLogger,
-              HealthMonitor<>* healthMonitor);
+    // void save(gfxstream::Stream* stream);
+    // void load(gfxstream::Stream* stream,
+    //           gfxstream::host::GfxApiLogger& gfxLogger,
+    //           HealthMonitor<>* healthMonitor);
 
     VkResult on_vkEnumerateInstanceVersion(gfxstream::base::BumpPool* pool,
                                            VkSnapshotApiCallHandle apiCallHandle,

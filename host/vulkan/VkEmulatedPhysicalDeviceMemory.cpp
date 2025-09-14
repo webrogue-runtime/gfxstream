@@ -23,6 +23,9 @@ namespace gfxstream {
 namespace vk {
 namespace {
 
+#ifdef max
+#undef max
+#endif
 static constexpr const uint32_t kInvalidMemoryTypeIndex = std::numeric_limits<uint32_t>::max();
 
 }  // namespace
