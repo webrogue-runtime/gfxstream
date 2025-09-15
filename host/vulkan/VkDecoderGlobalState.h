@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -932,6 +933,8 @@ class VkDecoderGlobalState {
         uint64_t size,
         uint64_t id
     );
+    void setWebrogueExtensions(std::vector<std::string> extensions);
+    void setPresentCallback(void (*func)(void*), void* userdata);
 
     // Transformations
     void deviceMemoryTransform_tohost(VkDeviceMemory* memory, uint32_t memoryCount,

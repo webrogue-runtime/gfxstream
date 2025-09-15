@@ -232,6 +232,9 @@ class VkDecoderGlobalState::Impl {
         mBufferInfo.clear();
         mMemoryInfo.clear();
         mWebrogueMemoryInfo.clear();
+        mWebrogueExtensions.clear();
+        mWebroguePresentCallback = nullptr;
+        mWebroguePresentCallbackUserdata = nullptr;
         mShaderModuleInfo.clear();
         mPipelineCacheInfo.clear();
         mPipelineLayoutInfo.clear();
@@ -8500,7 +8503,11 @@ class VkDecoderGlobalState::Impl {
             }
         }
 
-        return vk->vkQueuePresentKHR(queue, pPresentInfo);
+        VkResult result = vk->vkQueuePresentKHR(queue, pPresentInfo);
+        if(mWebroguePresentCallback) {
+            mWebroguePresentCallback(mWebroguePresentCallbackUserdata);
+        }
+        return result;
     }
 
     VkResult on_vkGetSwapchainImagesKHR(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
@@ -9045,6 +9052,14 @@ class VkDecoderGlobalState::Impl {
             .mappedSize = size,
         };
     }
+    void setWebrogueExtensions(std::vector<std::string> extensions) {
+        mWebrogueExtensions = extensions;
+    }
+    void setPresentCallback(void (*func)(void*), void* userdata) {
+        mWebroguePresentCallback = func;
+        mWebroguePresentCallbackUserdata = userdata;
+    }
+
 
 #define GUEST_EXTERNAL_MEMORY_HANDLE_TYPES                                \
     (VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID | \
@@ -9428,12 +9443,8 @@ class VkDecoderGlobalState::Impl {
 
         // TODO check extension
         // if(hasWebrogueSurfaceExtension) {
-        static std::vector<const char*> sWebrogueSurfaceExtensions = {
-            "VK_KHR_surface",
-            "VK_KHR_win32_surface",
-        };
-        for (auto injectedExtensions : sWebrogueSurfaceExtensions) {
-            res.push_back(injectedExtensions);
+        for (auto& injectedExtension : mWebrogueExtensions) {
+            res.push_back(injectedExtension.data());
         }
         // }
 
@@ -10275,6 +10286,9 @@ class VkDecoderGlobalState::Impl {
         mDescriptorUpdateTemplateInfo GUARDED_BY(mMutex);
     std::unordered_map<VkDeviceMemory, MemoryInfo> mMemoryInfo GUARDED_BY(mMutex);
     std::unordered_map<uint64_t, WebrogueMemoryInfo> mWebrogueMemoryInfo GUARDED_BY(mMutex);
+    std::vector<std::string> mWebrogueExtensions;
+    void (*mWebroguePresentCallback)(void*) = nullptr;
+    void* mWebroguePresentCallbackUserdata = nullptr;
     std::unordered_map<VkFence, FenceInfo> mFenceInfo GUARDED_BY(mMutex);
     std::unordered_map<VkFramebuffer, FramebufferInfo> mFramebufferInfo GUARDED_BY(mMutex);
     std::unordered_map<VkImage, ImageInfo> mImageInfo GUARDED_BY(mMutex);
@@ -11852,7 +11866,13 @@ void VkDecoderGlobalState::registerWebrogueBlob(
         buf,
         size, 
         id
-    ); 
+    );
+}
+void VkDecoderGlobalState::setWebrogueExtensions(std::vector<std::string> extensions) {
+    mImpl->setWebrogueExtensions(extensions);
+}
+void VkDecoderGlobalState::setPresentCallback(void (*func)(void*), void* userdata) {
+    mImpl->setPresentCallback(func, userdata);
 }
 
 #define DEFINE_TRANSFORMED_TYPE_IMPL(type)                                                        \
