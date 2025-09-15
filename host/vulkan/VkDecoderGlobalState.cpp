@@ -9443,8 +9443,9 @@ class VkDecoderGlobalState::Impl {
 
         // TODO check extension
         // if(hasWebrogueSurfaceExtension) {
-        for (auto& injectedExtension : mWebrogueExtensions) {
-            res.push_back(injectedExtension.data());
+        for (auto& extension : mWebrogueExtensions) {
+            if(extension == VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) continue;
+            res.push_back(extension.data());
         }
         // }
 
