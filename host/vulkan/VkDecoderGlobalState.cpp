@@ -24,6 +24,9 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#if TARGET_OS_IPHONE
+#include <sys/mman.h>
+#endif
 
 // #include "FrameBuffer.h"
 #include "RenderThreadInfoVk.h"
@@ -6077,27 +6080,30 @@ class VkDecoderGlobalState::Impl {
                 (createBlobInfoPtr->blobFlags & STREAM_BLOB_FLAG_CREATE_GUEST_HANDLE)) {
 #if 1
                 #ifdef PAGE_SIZE
-                    VkDeviceSize page_size = PAGE_SIZE;
+                    size_t page_size = PAGE_SIZE;
                 #elif defined(_WIN32)
-                    VkDeviceSize page_size = 4096;
+                    size_t page_size = 4096;
                 #else
-                    VkDeviceSize page_size = getpagesize();
+                    size_t page_size = getpagesize();
                 #endif
                 localAllocInfo.allocationSize += static_cast<VkDeviceSize>(page_size);
                 localAllocInfo.allocationSize &= ~static_cast<VkDeviceSize>(page_size - 1);
                 auto* webrogueMemoryInfo = gfxstream::base::find(mWebrogueMemoryInfo, createBlobInfoPtr->blobId);
                 if (!webrogueMemoryInfo) abort();
                 mappedPtr = webrogueMemoryInfo->mappedPtr;
-                int mappedPtrAlignment =
-                    reinterpret_cast<uintptr_t>(mappedPtr) % kPageSizeforBlob;
+                size_t mappedPtrAlignment = reinterpret_cast<size_t>(mappedPtr) % page_size;
                 if (mappedPtrAlignment != 0) {
-                    abort();
                     GFXSTREAM_ERROR(
                         "Warning: Mapped shared memory pointer is not aligned to page size, "
                         "alignment "
                         "is: %d",
                         mappedPtrAlignment);
                 }
+#if TARGET_OS_IPHONE // TARGET_IPHONE_SIMULATOR
+                // TODO unmap when calling clearLocked
+                void* mmap_ret = mmap(mappedPtr, localAllocInfo.allocationSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+                assert(mmap_ret == mappedPtr);
+#endif
                 importHostInfo = {
                     .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
                     .pNext = NULL,

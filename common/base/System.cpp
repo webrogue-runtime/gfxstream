@@ -33,7 +33,9 @@
 #endif
 
 #ifdef __APPLE__
+#if !TARGET_OS_IOS
 #include <libproc.h>
+#endif  // !TARGET_OS_IOS
 #include <mach/clock.h>
 #include <mach/mach.h>
 #endif  // __APPLE__
@@ -373,7 +375,7 @@ std::string getProgramDirectoryFromPlatform() {
             res.assign(path);
         }
     }
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !TARGET_OS_IOS
     char s[PATH_MAX];
     auto pid = getpid();
     proc_pidpath(pid, s, sizeof(s));
@@ -388,6 +390,8 @@ std::string getProgramDirectoryFromPlatform() {
     } else {
         res.assign("<unknown-application-dir>");
     }
+#elif defined(__APPLE__) && TARGET_OS_IOS
+    res.assign("<unknown-application-dir>");
 #elif defined(_WIN32) || defined(__MINGW64__)
 #ifndef PATH_MAX
 #define PATH_MAX 1024
