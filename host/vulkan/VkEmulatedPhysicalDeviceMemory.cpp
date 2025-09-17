@@ -19,6 +19,13 @@
 
 #include "gfxstream/common/logging.h"
 
+#if 1
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <assert.h>
+#include <unistd.h>
+#endif
+
 namespace gfxstream {
 namespace vk {
 namespace {
@@ -30,7 +37,8 @@ static constexpr const uint32_t kInvalidMemoryTypeIndex = std::numeric_limits<ui
 
 }  // namespace
 
-EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(
+EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(VkPhysicalDevice physicalDevice,
+    VulkanDispatch* vk,
     const VkPhysicalDeviceMemoryProperties& hostMemoryProperties,
     const uint32_t hostColorBufferMemoryTypeIndex, const gfxstream::host::FeatureSet& features) {
     // Start with the original host memory properties:
@@ -141,6 +149,67 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(
 
         mGuestColorBufferMemoryTypeIndex = ahbMemoryTypeIndex;
     }
+#if 1
+    if(vk) {
+        VkMemoryHostPointerPropertiesEXT memoryHostPointerProperties = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
+            .pNext = NULL,
+            .memoryTypeBits = 0,
+        };
+        VkResult ret = VK_SUCCESS;
+        char extensionName[] = VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME;
+        char* extensionNames[] = { extensionName };
+        float queuePriority = 0.5;
+        VkDeviceQueueCreateInfo queueCreateInfo = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .queueFamilyIndex = 0,
+            .queueCount = 1,
+            .pQueuePriorities = &queuePriority,
+        };
+        VkDeviceCreateInfo createInfo = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .queueCreateInfoCount = 1,
+            .pQueueCreateInfos = &queueCreateInfo,
+            // enabledLayerCount is deprecated and should not be used
+            .enabledLayerCount = 0,
+            // ppEnabledLayerNames is deprecated and should not be used
+            .ppEnabledLayerNames = nullptr,
+            .enabledExtensionCount = 1,
+            .ppEnabledExtensionNames = extensionNames,
+            .pEnabledFeatures = nullptr,
+        };
+        VkDevice device;
+        ret = vk->vkCreateDevice(physicalDevice, &createInfo, nullptr, &device);
+
+        if(ret == VK_SUCCESS) {
+            auto vkGetMemoryHostPointerPropertiesEXT = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vk->vkGetDeviceProcAddr(device, "vkGetMemoryHostPointerPropertiesEXT"));
+            if(vkGetMemoryHostPointerPropertiesEXT) {
+                const size_t alloc_size = 16 * 1024;
+                void *mappedPtr = mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+                ret = vk->vkGetMemoryHostPointerPropertiesEXT(
+                    device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, mappedPtr,
+                    &memoryHostPointerProperties
+                );
+                munmap(mappedPtr, alloc_size);
+
+                if (ret == VK_SUCCESS) {
+                    for (uint32_t i = 0; i < mGuestMemoryProperties.memoryTypeCount; i++) {
+                        const VkMemoryPropertyFlags flags = mGuestMemoryProperties.memoryTypes[i].propertyFlags;
+                        bool supportsHostImport = memoryHostPointerProperties.memoryTypeBits & (1 << i);
+                        if (!supportsHostImport) {
+                            mGuestMemoryProperties.memoryTypes[i].propertyFlags &= ~(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+                        }
+                    }
+                }
+            }
+            vk->vkDestroyDevice(device, nullptr);
+        }
+    }
+#endif // defined(ANDROID)
 }
 
 std::optional<EmulatedPhysicalDeviceMemoryProperties::HostMemoryInfo>

@@ -4380,7 +4380,7 @@ VkEmulation::findRepresentativeColorBufferMemoryTypeIndexLocked() {
         return std::nullopt;
     }
 
-    EmulatedPhysicalDeviceMemoryProperties helper(mDeviceInfo.memProps, hostMemoryTypeIndex,
+    EmulatedPhysicalDeviceMemoryProperties helper(nullptr, nullptr, mDeviceInfo.memProps, hostMemoryTypeIndex,
                                                   mFeatures);
     uint32_t guestMemoryTypeIndex = helper.getGuestColorBufferMemoryTypeIndex();
 

@@ -1350,9 +1350,9 @@ class VkDecoderGlobalState::Impl {
 
                 VkPhysicalDeviceMemoryProperties hostMemoryProperties;
                 vk->vkGetPhysicalDeviceMemoryProperties(physicalDevices[i], &hostMemoryProperties);
-
                 physdevInfo.memoryPropertiesHelper =
                     std::make_unique<EmulatedPhysicalDeviceMemoryProperties>(
+                        physicalDevices[i], vk,
                         hostMemoryProperties,
                         m_vkEmulation->getRepresentativeColorBufferMemoryTypeInfo()
                             .hostMemoryTypeIndex,
@@ -6099,11 +6099,15 @@ class VkDecoderGlobalState::Impl {
                         "is: %d",
                         mappedPtrAlignment);
                 }
-#if TARGET_OS_IPHONE // TARGET_IPHONE_SIMULATOR
+// TODO check if TARGET_IPHONE_SIMULATOR is enough
+#if TARGET_OS_IPHONE
                 // TODO unmap when calling clearLocked
-                void* mmap_ret = mmap(mappedPtr, localAllocInfo.allocationSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+                void* mmap_ret = mmap(mappedPtr, localAllocInfo.allocationSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_ANON, -1, 0);
                 assert(mmap_ret == mappedPtr);
-#endif
+                VkMemoryFdPropertiesKHR a;
+                a.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR;
+                VkResult ret = vk->vkGetMemoryFdPropertiesKHR(device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT, fd, &a);
+#endif // TARGET_OS_IPHONE
                 importHostInfo = {
                     .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
                     .pNext = NULL,

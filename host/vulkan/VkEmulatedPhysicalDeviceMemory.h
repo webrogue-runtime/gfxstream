@@ -19,6 +19,7 @@
 #include <optional>
 
 #include "gfxstream/host/Features.h"
+#include "goldfish_vk_dispatch.h"
 
 namespace gfxstream {
 namespace vk {
@@ -29,7 +30,9 @@ namespace vk {
 // guest, and helps to convert between both.
 class EmulatedPhysicalDeviceMemoryProperties {
    public:
-    EmulatedPhysicalDeviceMemoryProperties(const VkPhysicalDeviceMemoryProperties& host,
+    EmulatedPhysicalDeviceMemoryProperties(VkPhysicalDevice physicalDevice,
+                                           VulkanDispatch* vk,
+                                           const VkPhysicalDeviceMemoryProperties& host,
                                            uint32_t hostColorBufferMemoryTypeIndex,
                                            const gfxstream::host::FeatureSet& features);
 
