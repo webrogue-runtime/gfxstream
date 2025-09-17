@@ -6104,9 +6104,6 @@ class VkDecoderGlobalState::Impl {
                 // TODO unmap when calling clearLocked
                 void* mmap_ret = mmap(mappedPtr, localAllocInfo.allocationSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_ANON, -1, 0);
                 assert(mmap_ret == mappedPtr);
-                VkMemoryFdPropertiesKHR a;
-                a.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR;
-                VkResult ret = vk->vkGetMemoryFdPropertiesKHR(device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT, fd, &a);
 #endif // TARGET_OS_IPHONE
                 importHostInfo = {
                     .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,

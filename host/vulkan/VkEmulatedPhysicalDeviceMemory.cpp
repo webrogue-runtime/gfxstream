@@ -198,7 +198,6 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(V
 
                 if (ret == VK_SUCCESS) {
                     for (uint32_t i = 0; i < mGuestMemoryProperties.memoryTypeCount; i++) {
-                        const VkMemoryPropertyFlags flags = mGuestMemoryProperties.memoryTypes[i].propertyFlags;
                         bool supportsHostImport = memoryHostPointerProperties.memoryTypeBits & (1 << i);
                         if (!supportsHostImport) {
                             mGuestMemoryProperties.memoryTypes[i].propertyFlags &= ~(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
@@ -209,7 +208,7 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(V
             vk->vkDestroyDevice(device, nullptr);
         }
     }
-#endif // defined(ANDROID)
+#endif // 1
 }
 
 std::optional<EmulatedPhysicalDeviceMemoryProperties::HostMemoryInfo>
