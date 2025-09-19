@@ -238,6 +238,7 @@ class VkDecoderGlobalState::Impl {
         mWebrogueExtensions.clear();
         mWebroguePresentCallback = nullptr;
         mWebroguePresentCallbackUserdata = nullptr;
+        mWebrogueRegisterBlobCallback = nullptr;
         mShaderModuleInfo.clear();
         mPipelineCacheInfo.clear();
         mPipelineLayoutInfo.clear();
@@ -1180,7 +1181,7 @@ class VkDecoderGlobalState::Impl {
                     if (snapshotsEnabled()) {
                         snapshot()->vkDestroyInstance(nullptr, kInvalidSnapshotApiCallHandle, nullptr, 0, boxed, nullptr);
                     }
-                    vkDestroyInstanceImpl(unbox_VkInstance(boxed), nullptr);
+                    vkDestroyInstanceImpl(unbox_VkInstance(boxed), nullptr, dispatch_VkInstance(boxed));
                 });
         }
 
@@ -1191,7 +1192,7 @@ class VkDecoderGlobalState::Impl {
         sBoxedHandleManager.processDelayedRemoves(device);
     }
 
-    void vkDestroyInstanceImpl(VkInstance instance, const VkAllocationCallbacks* pAllocator) {
+    void vkDestroyInstanceImpl(VkInstance instance, const VkAllocationCallbacks* pAllocator, VulkanDispatch* ivk) {
         std::vector<VkDevice> devicesToDestroy;
 
         // Get the list of devices to destroy inside the lock ...
@@ -1223,12 +1224,13 @@ class VkDecoderGlobalState::Impl {
             mRenderDocWithMultipleVkInstances->removeVkInstance(instance);
         }
 
-        destroyInstanceObjects(instanceObjects);
+        destroyInstanceObjects(instanceObjects, ivk);
     }
 
     void on_vkDestroyInstance(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle,
                               VkInstance boxed_instance, const VkAllocationCallbacks* pAllocator) {
         auto instance = try_unbox_VkInstance(boxed_instance);
+        VulkanDispatch* ivk = dispatch_VkInstance(boxed_instance);
         if (instance == VK_NULL_HANDLE) {
             return;
         }
@@ -1236,7 +1238,7 @@ class VkDecoderGlobalState::Impl {
         // remove it from the cleanup callback mapping.
         m_vkEmulation->getCallbacks().unregisterProcessCleanupCallback(instance);
 
-        vkDestroyInstanceImpl(instance, pAllocator);
+        vkDestroyInstanceImpl(instance, pAllocator, ivk);
     }
 
     VkResult GetPhysicalDevices(VkInstance instance, VulkanDispatch* vk,
@@ -1353,6 +1355,7 @@ class VkDecoderGlobalState::Impl {
                 physdevInfo.memoryPropertiesHelper =
                     std::make_unique<EmulatedPhysicalDeviceMemoryProperties>(
                         physicalDevices[i], vk,
+                        mWebrogueRegisterBlobCallback == nullptr,
                         hostMemoryProperties,
                         m_vkEmulation->getRepresentativeColorBufferMemoryTypeInfo()
                             .hostMemoryTypeIndex,
@@ -2232,7 +2235,7 @@ class VkDecoderGlobalState::Impl {
             m_vkEmulation->getAstcLdrEmulationMode() == AstcEmulationMode::Cpu &&
             AstcCpuDecompressor::get().available();
         deviceInfo.decompPipelines =
-            std::make_unique<GpuDecompressionPipelineManager>(m_vk, *pDevice);
+            std::make_unique<GpuDecompressionPipelineManager>(vk, *pDevice);
         getSupportedFenceHandleTypes(vk, physicalDevice, &supportedFenceHandleTypes);
         getSupportedSemaphoreHandleTypes(vk, physicalDevice, &supportedBinarySemaphoreHandleTypes);
 
@@ -2625,11 +2628,7 @@ class VkDecoderGlobalState::Impl {
         }
         deviceInfo.externalFencePool.reset();
 
-        // Run the underlying API call.
-        {
-            AutoLock lock(*graphicsDriverLock());
-            m_vk->vkDestroyDevice(device, pAllocator);
-        }
+        deviceDispatch->vkDestroyDevice(device, pAllocator);
 
         GFXSTREAM_INFO("Destroyed VkDevice:%p", device);
         delete_VkDevice(deviceInfo.boxed);
@@ -6074,6 +6073,7 @@ class VkDecoderGlobalState::Impl {
         std::optional<VkImportMemoryHostPointerInfoEXT> importHostInfo;
         std::optional<VkExportMemoryAllocateInfo> exportAllocateInfo;
         std::shared_ptr<PrivateMemory> privateMemory = {};
+        WebrogueMemoryInfo* pWebrogueMemoryInfo = nullptr;
 
         if (emulateHostVisible) {
             if (createBlobInfoPtr && createBlobInfoPtr->blobMem == STREAM_BLOB_MEM_GUEST &&
@@ -6086,32 +6086,53 @@ class VkDecoderGlobalState::Impl {
                 #else
                     size_t page_size = getpagesize();
                 #endif
-                localAllocInfo.allocationSize += static_cast<VkDeviceSize>(page_size);
+                localAllocInfo.allocationSize += static_cast<VkDeviceSize>(page_size - 1);
                 localAllocInfo.allocationSize &= ~static_cast<VkDeviceSize>(page_size - 1);
-                auto* webrogueMemoryInfo = gfxstream::base::find(mWebrogueMemoryInfo, createBlobInfoPtr->blobId);
-                if (!webrogueMemoryInfo) abort();
-                mappedPtr = webrogueMemoryInfo->mappedPtr;
-                size_t mappedPtrAlignment = reinterpret_cast<size_t>(mappedPtr) % page_size;
-                if (mappedPtrAlignment != 0) {
-                    GFXSTREAM_ERROR(
-                        "Warning: Mapped shared memory pointer is not aligned to page size, "
-                        "alignment "
-                        "is: %d",
-                        mappedPtrAlignment);
+                pWebrogueMemoryInfo = gfxstream::base::find(mWebrogueMemoryInfo, createBlobInfoPtr->blobId);
+                if (!pWebrogueMemoryInfo) abort();
+                bool canImportGuestPointer = false;
+                if(m_vkEmulation->supportsExternalMemoryHostProperties()) {
+                    VkMemoryHostPointerPropertiesEXT memoryHostPointerProperties = {
+                        .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
+                        .pNext = NULL,
+                        .memoryTypeBits = 0,
+                    };
+                    VkResult ret = vk->vkGetMemoryHostPointerPropertiesEXT(
+                        device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, pWebrogueMemoryInfo->vmData,
+                        &memoryHostPointerProperties
+                    );
+                    if(ret == VK_SUCCESS) {
+                        canImportGuestPointer = memoryHostPointerProperties.memoryTypeBits & (1 << localAllocInfo.memoryTypeIndex);
+                    }
                 }
-// TODO check if TARGET_IPHONE_SIMULATOR is enough
-#if TARGET_OS_IPHONE
-                // TODO unmap when calling clearLocked
-                void* mmap_ret = mmap(mappedPtr, localAllocInfo.allocationSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_ANON, -1, 0);
-                assert(mmap_ret == mappedPtr);
-#endif // TARGET_OS_IPHONE
-                importHostInfo = {
-                    .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
-                    .pNext = NULL,
-                    .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-                    .pHostPointer = mappedPtr,
-                };
-                vk_append_struct(&structChainIter, &*importHostInfo);
+                if(canImportGuestPointer) {
+                    mappedPtr = pWebrogueMemoryInfo->vmData;
+                    // TODO error
+                    assert(pWebrogueMemoryInfo->size >= localAllocInfo.allocationSize);
+                    size_t mappedPtrAlignment = reinterpret_cast<size_t>(mappedPtr) % page_size;
+                    if (mappedPtrAlignment != 0) {
+                        GFXSTREAM_ERROR(
+                            "Warning: Mapped shared memory pointer is not aligned to page size, "
+                            "alignment "
+                            "is: %d",
+                            mappedPtrAlignment);
+                    }
+    // TODO check if TARGET_IPHONE_SIMULATOR is enough
+    #if TARGET_OS_IPHONE
+                    // TODO unmap when calling clearLocked
+                    void* mmap_ret = mmap(mappedPtr, localAllocInfo.allocationSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_ANON, -1, 0);
+                    assert(mmap_ret == mappedPtr);
+    #endif // TARGET_OS_IPHONE
+                    importHostInfo = {
+                        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+                        .pNext = NULL,
+                        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                        .pHostPointer = mappedPtr,
+                    };
+                    vk_append_struct(&structChainIter, &*importHostInfo);
+                } else if(mWebrogueRegisterBlobCallback) {
+                    mWebrogueRegisterBlobCallback(pWebrogueMemoryInfo->vmData, localAllocInfo.allocationSize, createBlobInfoPtr->blobId);
+                }
 #else
                 DescriptorType rawDescriptor;
                 auto descriptorInfoOpt = ExternalObjectManager::get()->removeBlobDescriptorInfo(
@@ -6330,6 +6351,10 @@ class VkDecoderGlobalState::Impl {
         memoryInfo.device = device;
         memoryInfo.memoryIndex = localAllocInfo.memoryTypeIndex;
 
+        if(pWebrogueMemoryInfo) {
+            pWebrogueMemoryInfo->deviceMemory = &memoryInfo;
+        }
+
         if (importCbInfoPtr) {
             memoryInfo.boundColorBuffer = importCbInfoPtr->colorBuffer;
         }
@@ -6356,9 +6381,9 @@ class VkDecoderGlobalState::Impl {
         // When external blobs are on, we want to map memory only if a workaround is using it in
         // the gfxstream process. This happens when ASTC CPU emulation is on.
         bool needToMap =
-            (!m_vkEmulation->getFeatures().ExternalBlob.enabled ||
+            ((!m_vkEmulation->getFeatures().ExternalBlob.enabled ||
              (deviceInfo->useAstcCpuDecompression && deviceInfo->emulateTextureAstc)) &&
-            !createBlobInfoPtr;
+            !createBlobInfoPtr) || pWebrogueMemoryInfo;
 
         // Some cases provide a mappedPtr, so we only map if we still don't have a pointer here.
         if (!mappedPtr && needToMap) {
@@ -9055,8 +9080,9 @@ class VkDecoderGlobalState::Impl {
         uint64_t id
     ) {
         mWebrogueMemoryInfo[id] = {
-            .mappedPtr = buf,
-            .mappedSize = size,
+            .deviceMemory = nullptr,
+            .vmData = buf,
+            .size = size,
         };
     }
     void setWebrogueExtensions(std::vector<std::string> extensions) {
@@ -9065,6 +9091,33 @@ class VkDecoderGlobalState::Impl {
     void setPresentCallback(void (*func)(void*), void* userdata) {
         mWebroguePresentCallback = func;
         mWebroguePresentCallbackUserdata = userdata;
+    }
+    void copyWebrogueShadowBlob(
+        uint64_t blob_id,
+        void* data,
+        uint64_t blob_offset,
+        uint64_t size,
+        uint32_t direction
+    ) {
+        auto* blob = gfxstream::base::find(mWebrogueMemoryInfo, blob_id);
+        if(!blob) return;
+        auto* memory = blob->deviceMemory;
+        if(!memory) return;
+        void* device_addr = ((char*)memory->ptr) + blob_offset;
+        void* vm_addr = data;
+        if(direction) {
+            // From vm to device
+            std::memcpy(device_addr, vm_addr, size);
+        } else {
+            // From device to vm
+            std::memcpy(vm_addr, device_addr, size);
+        }
+    }
+
+    void setWebrogueRegisterBlobCallback(
+        void (*callback)(void*, uint64_t, uint64_t)
+    ) {
+        mWebrogueRegisterBlobCallback = callback;
     }
 
 
@@ -9977,7 +10030,7 @@ class VkDecoderGlobalState::Impl {
                                            deviceObjects.fences, deviceObjects.queues, nullptr);
     }
 
-    void destroyInstanceObjects(InstanceObjects& objects) {
+    void destroyInstanceObjects(InstanceObjects& objects, VulkanDispatch* ivk) {
         VkInstance instance = objects.instance.key();
         InstanceInfo& instanceInfo = objects.instance.mapped();
         LOG_CALLS_VERBOSE(
@@ -9990,7 +10043,7 @@ class VkDecoderGlobalState::Impl {
             destroyDeviceObjects(deviceObjects);
         }
 
-        m_vk->vkDestroyInstance(instance, nullptr);
+        ivk->vkDestroyInstance(instance, nullptr);
         GFXSTREAM_INFO("Destroyed VkInstance:%p for application:'%s' engine:'%s'.", instance,
                        instanceInfo.applicationName.c_str(), instanceInfo.engineName.c_str());
 
@@ -10323,6 +10376,8 @@ class VkDecoderGlobalState::Impl {
     }
     std::unordered_map<int, VkSemaphore> mExternalSemaphoresById GUARDED_BY(mMutex);
 #endif
+
+    void (*mWebrogueRegisterBlobCallback)(void*, uint64_t, uint64_t) = nullptr;
 
     VkDecoderSnapshot mSnapshot;
     enum class SnapshotState {
@@ -11882,7 +11937,21 @@ void VkDecoderGlobalState::setWebrogueExtensions(std::vector<std::string> extens
 void VkDecoderGlobalState::setPresentCallback(void (*func)(void*), void* userdata) {
     mImpl->setPresentCallback(func, userdata);
 }
+void VkDecoderGlobalState::copyWebrogueShadowBlob(
+    uint64_t blob_id,
+    void* data,
+    uint64_t blob_offset,
+    uint64_t size,
+    uint32_t direction
+) {
+    mImpl->copyWebrogueShadowBlob(blob_id, data, blob_offset, size, direction);
+}
 
+void VkDecoderGlobalState::setWebrogueRegisterBlobCallback(
+  void (*callback)(void*, uint64_t, uint64_t)
+) {
+    mImpl->setWebrogueRegisterBlobCallback(callback);
+}
 #define DEFINE_TRANSFORMED_TYPE_IMPL(type)                                                        \
     void VkDecoderGlobalState::transformImpl_##type##_tohost(const type* val, uint32_t count) {   \
         mImpl->transformImpl_##type##_tohost(val, count);                                         \

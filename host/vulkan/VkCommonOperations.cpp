@@ -1752,7 +1752,7 @@ VkEmulation::~VkEmulation() {
 
     mIvk->vkDestroyDevice(mDevice, nullptr);
 
-    mGvk->vkDestroyInstance(mInstance, nullptr);
+    mIvk->vkDestroyInstance(mInstance, nullptr);
 }
 
 bool VkEmulation::isYcbcrEmulationEnabled() const { return mEnableYcbcrEmulation; }
@@ -4380,7 +4380,7 @@ VkEmulation::findRepresentativeColorBufferMemoryTypeIndexLocked() {
         return std::nullopt;
     }
 
-    EmulatedPhysicalDeviceMemoryProperties helper(nullptr, nullptr, mDeviceInfo.memProps, hostMemoryTypeIndex,
+    EmulatedPhysicalDeviceMemoryProperties helper(nullptr, nullptr, false, mDeviceInfo.memProps, hostMemoryTypeIndex,
                                                   mFeatures);
     uint32_t guestMemoryTypeIndex = helper.getGuestColorBufferMemoryTypeIndex();
 

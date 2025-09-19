@@ -206,8 +206,9 @@ struct EventInfo {
 };
 
 struct WebrogueMemoryInfo {
-    void* mappedPtr;
-    uint64_t mappedSize;
+    MemoryInfo* deviceMemory;
+    void* vmData;
+    uint64_t size;
 };
 
 struct InstanceInfo {

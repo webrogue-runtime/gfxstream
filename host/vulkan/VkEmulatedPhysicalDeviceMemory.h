@@ -32,6 +32,7 @@ class EmulatedPhysicalDeviceMemoryProperties {
    public:
     EmulatedPhysicalDeviceMemoryProperties(VkPhysicalDevice physicalDevice,
                                            VulkanDispatch* vk,
+                                           bool strict_host_visible_external_pointer,
                                            const VkPhysicalDeviceMemoryProperties& host,
                                            uint32_t hostColorBufferMemoryTypeIndex,
                                            const gfxstream::host::FeatureSet& features);

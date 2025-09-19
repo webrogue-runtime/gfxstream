@@ -935,6 +935,16 @@ class VkDecoderGlobalState {
     );
     void setWebrogueExtensions(std::vector<std::string> extensions);
     void setPresentCallback(void (*func)(void*), void* userdata);
+    void copyWebrogueShadowBlob(
+        uint64_t blob_id,
+        void* data,
+        uint64_t blob_offset,
+        uint64_t size,
+        uint32_t direction
+    );
+    void setWebrogueRegisterBlobCallback(
+        void (*callback)(void*, uint64_t, uint64_t)
+    );
 
     // Transformations
     void deviceMemoryTransform_tohost(VkDeviceMemory* memory, uint32_t memoryCount,

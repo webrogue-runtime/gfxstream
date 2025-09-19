@@ -39,6 +39,7 @@ static constexpr const uint32_t kInvalidMemoryTypeIndex = std::numeric_limits<ui
 
 EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(VkPhysicalDevice physicalDevice,
     VulkanDispatch* vk,
+    bool strict_host_visible_external_pointer,
     const VkPhysicalDeviceMemoryProperties& hostMemoryProperties,
     const uint32_t hostColorBufferMemoryTypeIndex, const gfxstream::host::FeatureSet& features) {
     // Start with the original host memory properties:
@@ -149,7 +150,7 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(V
 
         mGuestColorBufferMemoryTypeIndex = ahbMemoryTypeIndex;
     }
-#if 1
+
     if(vk) {
         VkMemoryHostPointerPropertiesEXT memoryHostPointerProperties = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
@@ -199,8 +200,12 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(V
                 if (ret == VK_SUCCESS) {
                     for (uint32_t i = 0; i < mGuestMemoryProperties.memoryTypeCount; i++) {
                         bool supportsHostImport = memoryHostPointerProperties.memoryTypeBits & (1 << i);
-                        if (!supportsHostImport) {
-                            mGuestMemoryProperties.memoryTypes[i].propertyFlags &= ~(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+                        if (mGuestMemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT && !supportsHostImport) {
+                            if(strict_host_visible_external_pointer) {
+                                mGuestMemoryProperties.memoryTypes[i].propertyFlags &= ~(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD);
+                            } else {
+                                mGuestMemoryProperties.memoryTypes[i].propertyFlags &= ~VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+                            }
                         }
                     }
                 }
@@ -208,7 +213,6 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(V
             vk->vkDestroyDevice(device, nullptr);
         }
     }
-#endif // 1
 }
 
 std::optional<EmulatedPhysicalDeviceMemoryProperties::HostMemoryInfo>
