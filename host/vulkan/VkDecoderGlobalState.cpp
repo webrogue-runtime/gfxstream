@@ -2248,9 +2248,9 @@ class VkDecoderGlobalState::Impl {
         // Use vkGetMemoryWin32HandleKHR
         deviceInfo.getMemoryHandleFunc = reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(
             vk->vkGetDeviceProcAddr(*pDevice, "vkGetMemoryWin32HandleKHR"));
-        if (!deviceInfo.getMemoryHandleFunc) {
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
+        // if (!deviceInfo.getMemoryHandleFunc) {
+        //     return VK_ERROR_INITIALIZATION_FAILED;
+        // }
 #elif __linux__
         // Use vkGetMemoryFdKHR
         deviceInfo.getMemoryHandleFunc = reinterpret_cast<PFN_vkGetMemoryFdKHR>(

@@ -19,7 +19,7 @@
 
 #include "gfxstream/common/logging.h"
 
-#if 1
+#ifndef _WIN32
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <assert.h>
@@ -190,12 +190,20 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(V
             auto vkGetMemoryHostPointerPropertiesEXT = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vk->vkGetDeviceProcAddr(device, "vkGetMemoryHostPointerPropertiesEXT"));
             if(vkGetMemoryHostPointerPropertiesEXT) {
                 const size_t alloc_size = 16 * 1024;
+#ifdef _WIN32
+                void *mappedPtr = _aligned_malloc(alloc_size, alloc_size);
+#else
                 void *mappedPtr = mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+#endif
                 ret = vk->vkGetMemoryHostPointerPropertiesEXT(
                     device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, mappedPtr,
                     &memoryHostPointerProperties
                 );
+#ifdef _WIN32
+                _aligned_free(mappedPtr);
+#else
                 munmap(mappedPtr, alloc_size);
+#endif
 
                 if (ret == VK_SUCCESS) {
                     for (uint32_t i = 0; i < mGuestMemoryProperties.memoryTypeCount; i++) {
