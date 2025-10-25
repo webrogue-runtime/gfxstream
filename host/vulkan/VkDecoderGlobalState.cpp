@@ -2255,9 +2255,9 @@ class VkDecoderGlobalState::Impl {
         // Use vkGetMemoryFdKHR
         deviceInfo.getMemoryHandleFunc = reinterpret_cast<PFN_vkGetMemoryFdKHR>(
             vk->vkGetDeviceProcAddr(*pDevice, "vkGetMemoryFdKHR"));
-        if (!deviceInfo.getMemoryHandleFunc) {
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
+//        if (!deviceInfo.getMemoryHandleFunc) {
+//            return VK_ERROR_INITIALIZATION_FAILED;
+//        }
 #endif
 
         GFXSTREAM_INFO(
