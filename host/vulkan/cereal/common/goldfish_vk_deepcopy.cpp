@@ -34,11 +34,12 @@
 
 #include <string.h>
 
-#include "VkUtils.h"
 #include "goldfish_vk_extension_structs.h"
 #include "goldfish_vk_private_defs.h"
+#include "vk_utils.h"
 
 namespace gfxstream {
+namespace host {
 namespace vk {
 
 void deepcopy_extension_struct(Allocator* alloc, VkStructureType rootType,
@@ -11811,4 +11812,5 @@ void deepcopy_extension_struct(Allocator* alloc, VkStructureType rootType,
 }
 
 }  // namespace vk
+}  // namespace host
 }  // namespace gfxstream

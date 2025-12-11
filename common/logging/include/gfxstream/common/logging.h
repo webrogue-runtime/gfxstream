@@ -54,6 +54,7 @@ using GfxstreamLogCallback =
 void SetGfxstreamLogCallback(GfxstreamLogCallback callback);
 
 void SetGfxstreamLogLevel(LogLevel level);
+LogLevel GetGfxstreamLogLevel();
 
 #ifndef __PRETTY_FUNCTION__
 #define __PRETTY_FUNCTION__ __FUNCTION__

@@ -32,9 +32,10 @@
 
 #include "goldfish_vk_transform.h"
 
-#include "VkDecoderGlobalState.h"
+#include "vk_decoder_global_state.h"
 
 namespace gfxstream {
+namespace host {
 namespace vk {
 
 void transform_tohost_extension_struct(VkDecoderGlobalState* resourceTracker,
@@ -11819,4 +11820,5 @@ void transform_fromhost_extension_struct(VkDecoderGlobalState* resourceTracker,
 }
 
 }  // namespace vk
+}  // namespace host
 }  // namespace gfxstream

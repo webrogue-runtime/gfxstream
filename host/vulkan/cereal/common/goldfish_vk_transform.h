@@ -38,6 +38,7 @@
 #include "vulkan_gfxstream.h"
 
 namespace gfxstream {
+namespace host {
 namespace vk {
 
 class VkDecoderGlobalState;
@@ -3832,4 +3833,5 @@ void transform_fromhost_VkPhysicalDeviceImageCompressionControlSwapchainFeatures
 
 #endif
 }  // namespace vk
+}  // namespace host
 }  // namespace gfxstream

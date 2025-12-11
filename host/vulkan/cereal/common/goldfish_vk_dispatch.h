@@ -35,17 +35,22 @@
 #include "goldfish_vk_private_defs.h"
 #include "vk_android_native_buffer_gfxstream.h"
 #include "vulkan_gfxstream.h"
+
 namespace gfxstream {
+namespace host {
 namespace vk {
 
 struct VulkanDispatch;
 
 }  // namespace vk
+}  // namespace host
 }  // namespace gfxstream
+
 using DlOpenFunc = void*(void);
 using DlSymFunc = void*(void*, const char*);
 
 namespace gfxstream {
+namespace host {
 namespace vk {
 
 void init_vulkan_dispatch_from_system_loader(DlOpenFunc dlOpenFunc, DlSymFunc dlSymFunc,
@@ -488,6 +493,10 @@ struct VulkanDispatch {
     PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
     PFN_vkSubmitDebugUtilsMessageEXT vkSubmitDebugUtilsMessageEXT;
 #endif
+#ifdef VK_ANDROID_external_memory_android_hardware_buffer
+    PFN_vkGetAndroidHardwareBufferPropertiesANDROID vkGetAndroidHardwareBufferPropertiesANDROID;
+    PFN_vkGetMemoryAndroidHardwareBufferANDROID vkGetMemoryAndroidHardwareBufferANDROID;
+#endif
 #ifdef VK_EXT_image_drm_format_modifier
     PFN_vkGetImageDrmFormatModifierPropertiesEXT vkGetImageDrmFormatModifierPropertiesEXT;
 #endif
@@ -597,4 +606,5 @@ struct VulkanDispatch {
 };
 
 }  // namespace vk
+}  // namespace host
 }  // namespace gfxstream
