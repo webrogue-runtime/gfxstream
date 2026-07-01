@@ -9109,26 +9109,12 @@ class VkDecoderGlobalState::Impl {
         mWebroguePresentCallback = func;
         mWebroguePresentCallbackUserdata = userdata;
     }
-    void copyWebrogueShadowBlob(
-        uint64_t blob_id,
-        void* data,
-        uint64_t blob_offset,
-        uint64_t size,
-        uint32_t direction
-    ) {
+    void *getWebrogueHostBlob(uint64_t blob_id) {
         auto* blob = gfxstream::base::find(mWebrogueMemoryInfo, blob_id);
-        if(!blob) return;
-        auto* memory = blob->deviceMemory;
-        if(!memory) return;
-        void* device_addr = ((char*)memory->ptr) + blob_offset;
-        void* vm_addr = data;
-        if(direction) {
-            // From vm to device
-            std::memcpy(device_addr, vm_addr, size);
-        } else {
-            // From device to vm
-            std::memcpy(vm_addr, device_addr, size);
-        }
+        if(!blob) return nullptr;
+        auto* deviceMemory = blob->deviceMemory;
+        if(!deviceMemory) return nullptr;
+        return deviceMemory->ptr;
     }
 
     void setWebrogueRegisterBlobCallback(
@@ -11985,14 +11971,8 @@ void VkDecoderGlobalState::setWebrogueExtensions(std::vector<std::string> extens
 void VkDecoderGlobalState::setPresentCallback(void (*func)(void*), void* userdata) {
     mImpl->setPresentCallback(func, userdata);
 }
-void VkDecoderGlobalState::copyWebrogueShadowBlob(
-    uint64_t blob_id,
-    void* data,
-    uint64_t blob_offset,
-    uint64_t size,
-    uint32_t direction
-) {
-    mImpl->copyWebrogueShadowBlob(blob_id, data, blob_offset, size, direction);
+void *VkDecoderGlobalState::getWebrogueHostBlob(uint64_t blob_id) {
+    return mImpl->getWebrogueHostBlob(blob_id);
 }
 
 void VkDecoderGlobalState::setWebrogueRegisterBlobCallback(
