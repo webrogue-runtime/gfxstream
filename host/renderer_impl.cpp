@@ -16,21 +16,22 @@
 #include <assert.h>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 #include <variant>
 
 #include "frame_buffer.h"
+#include "gfxstream/common/logging.h"
 #include "gfxstream/host/graphics_driver_lock.h"
-#include "render_channel_impl.h"
-#include "render_thread.h"
+#include "gfxstream/host/renderer_operations.h"
+#include "gfxstream/host/tracing.h"
 #include "gfxstream/system/System.h"
 #include "gfxstream/threads/WorkerThread.h"
-#include "gfxstream/common/logging.h"
-#include "gfxstream/host/renderer_operations.h"
-
 #if GFXSTREAM_ENABLE_HOST_GLES
 #include "host/gl/emulated_egl_fence_sync.h"
 #endif
+#include "render_channel_impl.h"
+#include "render_thread.h"
 
 namespace gfxstream {
 namespace host {
@@ -63,20 +64,25 @@ static const bool kUseSubwindowThread = false;
 class RendererImpl::ProcessCleanupThread {
 public:
     ProcessCleanupThread()
-        : mCleanupWorker([](Cmd cmd) {
-            using gfxstream::base::WorkerProcessingResult;
-            struct {
-                WorkerProcessingResult operator()(CleanProcessResources resources) {
-                    FrameBuffer::getFB()->cleanupProcGLObjects(resources.puid);
-                    // resources.resource are destroyed automatically when going out of the scope.
-                    return WorkerProcessingResult::Continue;
-                }
-                WorkerProcessingResult operator()(Exit) {
-                    return WorkerProcessingResult::Stop;
-                }
-            } visitor;
-            return std::visit(visitor, std::move(cmd));
-          }) {
+        : mCleanupWorker(
+            []() {
+                GFXSTREAM_TRACE_NAME_THREAD("Gfxstream Renderer Cleanup Worker");
+            },
+            [](Cmd cmd) {
+                using gfxstream::base::WorkerProcessingResult;
+                struct {
+                    WorkerProcessingResult operator()(CleanProcessResources resources) {
+                        FrameBuffer::getFB()->cleanupProcGLObjects(resources.puid);
+                        // resources.resource are destroyed automatically when going out of the
+                        // scope.
+                        return WorkerProcessingResult::Continue;
+                    }
+                    WorkerProcessingResult operator()(Exit) {
+                        return WorkerProcessingResult::Stop;
+                    }
+                } visitor;
+                return std::visit(visitor, std::move(cmd));
+            }) {
         mCleanupWorker.start();
     }
 
@@ -337,12 +343,6 @@ void RendererImpl::pauseAllPreSave() {
             c->renderThread()->pausePreSnapshot();
         }
     }
-    {
-        std::lock_guard<std::mutex> lock(mAddressSpaceRenderThreadMutex);
-        for (const auto& thread : mAddressSpaceRenderThreads) {
-            thread->pausePreSnapshot();
-        }
-    }
     waitForProcessCleanup();
 }
 
@@ -465,14 +465,17 @@ RendererImpl::HardwareStrings RendererImpl::getHardwareStrings() {
     return res;
 }
 
-void RendererImpl::getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
+bool RendererImpl::getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
                                                 uint32_t* driver_version, uint32_t* api_version,
                                                 uint32_t* vendor_id, uint32_t* device_id,
                                                 uint32_t* device_type, uint64_t* device_memory) {
-    assert(mRenderWindow);
-    mRenderWindow->getVulkanEmulationDeviceInfo(device_name, driver_info, driver_version,
-                                                api_version, vendor_id, device_id, device_type,
-                                                device_memory);
+    if (!mRenderWindow) {
+        GFXSTREAM_ERROR("%s: invalid state", __func__);
+        return false;
+    }
+    return mRenderWindow->getVulkanEmulationDeviceInfo(device_name, driver_info, driver_version,
+                                                       api_version, vendor_id, device_id,
+                                                       device_type, device_memory);
 }
 
 void RendererImpl::setPostCallback(RendererImpl::OnPostCallback onPost,
@@ -559,6 +562,14 @@ void RendererImpl::setScreenBackground(int width, int height, const uint8_t* rgb
     mRenderWindow->setScreenBackground(width, height, rgbaData);
 }
 
+void RendererImpl::setDisplayLayout(int screenWidth, int screenHeight, const Rect& displayRect) {
+    if(!mRenderWindow) {
+        GFXSTREAM_ERROR("%s: invalid render window!", __func__);
+        return;
+    }
+    mRenderWindow->setDisplayLayout(screenWidth, screenHeight, displayRect);
+}
+
 void RendererImpl::onGuestGraphicsProcessCreate(uint64_t puid) {
     FrameBuffer::getFB()->createGraphicsProcessResources(puid);
 }
@@ -599,8 +610,9 @@ static struct AndroidVirtioGpuOps sVirtioGpuOps = {
     .read_color_buffer =
         [](uint32_t handle, int x, int y, int width, int height, uint32_t format, uint32_t type,
            void* pixels) {
-            FrameBuffer::getFB()->readColorBufferDeprecated(handle, x, y, width, height, format, type,
-                                                            pixels);
+            FrameBuffer::getFB()->readColorBufferDeprecated(handle, x, y, width, height, format,
+                                                            type, pixels,
+                                                            std::numeric_limits<uint64_t>::max());
         },
     .read_color_buffer2 =
         [](uint32_t handle, int x, int y, int width, int height, uint32_t format, uint32_t type,

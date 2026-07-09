@@ -20,6 +20,8 @@
 #include "gfxstream/system/System.h"
 #include "gfxstream/common/logging.h"
 
+#include <sstream>
+
 using gfxstream::base::AutoLock;
 using gfxstream::base::Lock;
 using gfxstream::base::pj;
@@ -28,6 +30,11 @@ using gfxstream::base::pathExists;
 namespace gfxstream {
 namespace host {
 namespace vk {
+
+static constexpr char kLavapipeIcdJson[] = "lvp_icd.json";
+static constexpr char kSwiftShaderIcdJson[] = "vk_swiftshader_icd.json";
+
+static std::string sDirectDriverLibraryPath = "";
 
 // Function to check if the current process is running with full elevated rights
 bool processInHighIntegrityMode() {
@@ -68,6 +75,18 @@ static std::string icdJsonNameToProgramAndLauncherPaths(const std::string& icdFi
     return fullpath;
 }
 
+static std::string resolveDriverDllPath(const std::string& icdFilename, const std::string& dllFilename) {
+    std::string jsonPath = icdJsonNameToProgramAndLauncherPaths(icdFilename);
+    std::string dirName, baseName;
+    if (gfxstream::base::PathUtils::split(jsonPath.c_str(), &dirName, &baseName)) {
+        std::string dllPath = pj({dirName, dllFilename});
+        if (pathExists(dllPath.c_str())) {
+            return dllPath;
+        }
+    }
+    return "";
+}
+
 static void setIcdPaths(const std::string& icdFilename) {
     const std::string paths = icdJsonNameToProgramAndLauncherPaths(icdFilename);
     GFXSTREAM_INFO("Setting ICD filenames for the loader = %s", paths.c_str());
@@ -79,6 +98,7 @@ static void setIcdPaths(const std::string& icdFilename) {
 static void initIcdPaths(bool forTesting) {
     auto androidIcd = gfxstream::base::getEnvironmentVariable("ANDROID_EMU_VK_ICD");
 
+#ifdef CONFIG_AEMU
     if (forTesting) {
 #if defined(__APPLE__) && !defined(__arm64__) || defined(__WIN32__)
         const char* testingICD = "swiftshader";
@@ -95,7 +115,9 @@ static void initIcdPaths(bool forTesting) {
         }
         gfxstream::base::setEnvironmentVariable("ANDROID_EMU_VK_ICD", testingICD);
         androidIcd = testingICD;
-    } else if (androidIcd == "") {
+    } else
+#endif
+    if (androidIcd == "") {
         // Rely on user to set VK_DRIVER_FILES
         return;
     }
@@ -104,23 +126,46 @@ static void initIcdPaths(bool forTesting) {
     // environment variables. TODO(b/446119531) Load the driver dlls directly in this case.
     // Note: in testing mode the loader allows env vars in high integrity mode
     const bool highIntegrityMode = processInHighIntegrityMode();
-    if (highIntegrityMode && !forTesting) {
-        GFXSTREAM_ERROR("%s: Vulkan ICD selection is not supported with elevated permissions.",
-                        __func__);
-    }
 
     if (androidIcd == "lavapipe") {
         GFXSTREAM_INFO("%s: ICD set to 'lavapipe', using Lavapipe ICD", __func__);
-        setIcdPaths("lvp_icd.json");
+        if (highIntegrityMode && !forTesting) {
+            sDirectDriverLibraryPath = resolveDriverDllPath(kLavapipeIcdJson, "libvulkan_lvp" + std::string(LIBSUFFIX));
+            if (sDirectDriverLibraryPath.empty()) {
+                GFXSTREAM_ERROR("%s: Failed to resolve Lavapipe driver DLL path.", __func__);
+            } else {
+                GFXSTREAM_INFO("%s: Resolved Lavapipe driver DLL path for direct loading: %s", __func__, sDirectDriverLibraryPath.c_str());
+            }
+        } else {
+            setIcdPaths(kLavapipeIcdJson);
+        }
     } else if (androidIcd == "swiftshader") {
         GFXSTREAM_INFO("%s: ICD set to 'swiftshader', using Swiftshader ICD", __func__);
-        setIcdPaths("vk_swiftshader_icd.json");
+        if (highIntegrityMode && !forTesting) {
+            sDirectDriverLibraryPath = resolveDriverDllPath(kSwiftShaderIcdJson, "vk_swiftshader" + std::string(LIBSUFFIX));
+            if (sDirectDriverLibraryPath.empty()) {
+                sDirectDriverLibraryPath = resolveDriverDllPath(kSwiftShaderIcdJson, "libvk_swiftshader" + std::string(LIBSUFFIX));
+            }
+            if (sDirectDriverLibraryPath.empty()) {
+                GFXSTREAM_ERROR("%s: Failed to resolve SwiftShader driver DLL path.", __func__);
+            } else {
+                GFXSTREAM_INFO("%s: Resolved SwiftShader driver DLL path for direct loading: %s", __func__, sDirectDriverLibraryPath.c_str());
+            }
+        } else {
+            setIcdPaths(kSwiftShaderIcdJson);
+        }
     } else {
 #ifdef __APPLE__
         // Mac: Use MoltenVK by default unless GPU mode is set to swiftshader
+        const bool verboseLogs =
+            (gfxstream::base::getEnvironmentVariable("ANDROID_EMUGL_VERBOSE") == "1");
         if (androidIcd == "kosmickrisp") {
             gfxstream::base::setEnvironmentVariable("ANDROID_EMU_VK_ICD", "kosmickrisp");
-            setIcdPaths("kosmickrisp_icd.json");
+            setIcdPaths("libkosmickrisp_icd.json");
+
+            if (verboseLogs) {
+                gfxstream::base::setEnvironmentVariable("MESA_KK_DEBUG", "1");
+            }
         } else {
             if (androidIcd != "moltenvk") {
                 GFXSTREAM_WARNING("%s: Unknown ICD (%s), resetting to MoltenVK", __func__,
@@ -134,8 +179,6 @@ static void initIcdPaths(bool forTesting) {
             // 2: Log errors and warning messages.
             // 3: Log errors, warnings and informational messages.
             // 4: Log errors, warnings, infos and debug messages.
-            const bool verboseLogs =
-                (gfxstream::base::getEnvironmentVariable("ANDROID_EMUGL_VERBOSE") == "1");
             const char* logLevelValue = verboseLogs ? "4" : "1";
             gfxstream::base::setEnvironmentVariable("MVK_CONFIG_LOG_LEVEL", logLevelValue);
 
@@ -204,6 +247,23 @@ class SharedLibraries {
                 return funcPtr;
             }
         }
+
+        // Fallback for ICD direct loading (bypassing Vulkan Loader)
+        PFN_vkGetInstanceProcAddr gipa = nullptr;
+        for (const auto& lib : mLibs) {
+            gipa = reinterpret_cast<PFN_vkGetInstanceProcAddr>(lib->findSymbol("vkGetInstanceProcAddr"));
+            if (gipa) break;
+            gipa = reinterpret_cast<PFN_vkGetInstanceProcAddr>(lib->findSymbol("vk_icdGetInstanceProcAddr"));
+            if (gipa) break;
+        }
+
+        if (gipa) {
+            void* funcPtr = reinterpret_cast<void*>(gipa(nullptr, name));
+            if (funcPtr) {
+                return funcPtr;
+            }
+        }
+
         return nullptr;
     }
 
@@ -248,6 +308,14 @@ class VulkanDispatchImpl {
         if (!explicitPath.empty()) {
             return {
                 explicitPath,
+            };
+        }
+
+        const bool highIntegrityMode = processInHighIntegrityMode();
+        if (highIntegrityMode && !mForTesting && !sDirectDriverLibraryPath.empty()) {
+            GFXSTREAM_INFO("%s: Bypassing Vulkan Loader, using direct driver path: %s", __func__, sDirectDriverLibraryPath.c_str());
+            return {
+                sDirectDriverLibraryPath,
             };
         }
 
@@ -330,6 +398,33 @@ void VulkanDispatchImpl::initialize(bool forTesting) {
         return;
     }
 
+#if defined(CONFIG_AEMU) && defined(_WIN32)
+    // We cannot guarantee compatibility with implicit layers, which can be problematic on Windows.
+    // Disable implicit layers for the loader if the user didn't set VK_LOADER_LAYERS_DISABLE and
+    // won't be using the RenderDoc integration Ref: b/492462313
+    if (gfxstream::base::getEnvironmentVariable("ANDROID_EMU_RENDERDOC").empty()) {
+        const std::string implicitLayersTag = "~implicit~";
+        const std::string allLayersTag = "~all~";
+        const std::string vulkanLayersDisabled =
+            gfxstream::base::getEnvironmentVariable("VK_LOADER_LAYERS_DISABLE");
+        if (vulkanLayersDisabled.find(implicitLayersTag) != std::string::npos ||
+            vulkanLayersDisabled.find(allLayersTag) != std::string::npos) {
+            GFXSTREAM_INFO("Implicit Vulkan layers are disabled by the user.");
+        } else if (vulkanLayersDisabled.empty()) {
+            GFXSTREAM_INFO(
+                "Disabling implicit Vulkan layers to avoid compatibility issues. Set "
+                "VK_LOADER_LAYERS_DISABLE manually to disable this behavior.");
+            gfxstream::base::setEnvironmentVariable("VK_LOADER_LAYERS_DISABLE", implicitLayersTag);
+        } else {
+            // Allow users to overwrite auto disablement
+            GFXSTREAM_WARNING(
+                "VK_LOADER_LAYERS_DISABLE is set to '%s' by the user, implicit layers won't be auto "
+                "disabled. This may cause compatibility issues with the emulator.",
+                vulkanLayersDisabled.c_str());
+        }
+    }
+#endif
+
     mForTesting = forTesting;
     initIcdPaths(mForTesting);
 
@@ -340,6 +435,46 @@ void VulkanDispatchImpl::initialize(bool forTesting) {
         if (gfxstream::base::getEnvironmentVariable("VK_LOADER_DEBUG").empty()) {
             GFXSTREAM_VERBOSE("Enabling error messages from vulkan loader");
             gfxstream::base::setEnvironmentVariable("VK_LOADER_DEBUG", "error,warn");
+        }
+    }
+
+    if (!gfxstream::base::getEnvironmentVariable("GFXSTREAM_USE_TESTING_VALIDATION_LAYERS").empty()) {
+        GFXSTREAM_INFO("GFXSTREAM_USE_TESTING_VALIDATION_LAYERS set. Enabling Vulkan validation layers.");
+
+        // Our VkLayer_khronos_validation.json expects the VVL .so file to be present in the same directory.
+        std::string vvlPath =
+            pj({gfxstream::base::getProgramDirectory(), "testlib64", "layers"});
+        if (!pathExists(vvlPath.c_str())) {
+            vvlPath =
+                pj({gfxstream::base::getLauncherDirectory(), "testlib64", "layers"});
+        }
+
+        if (pathExists(vvlPath.c_str())) {
+#ifdef _WIN32
+            const char kPathSeparator = ';';
+#else
+            const char kPathSeparator = ':';
+#endif
+            const char* const kVkAddLayerPathEnvVar = "VK_ADD_LAYER_PATH";
+            const char* const kVkInstanceLayersEnvVar = "VK_INSTANCE_LAYERS";
+            const char* const kEnableVVLEnvVar = "VK_LAYER_KHRONOS_validation";
+
+            if (!gfxstream::base::getEnvironmentVariable(kVkAddLayerPathEnvVar).empty()) {
+                GFXSTREAM_WARNING("Overriding %s", kVkAddLayerPathEnvVar);
+            }
+            gfxstream::base::setEnvironmentVariable(kVkAddLayerPathEnvVar, vvlPath);
+            auto layersEnvVar = gfxstream::base::getEnvironmentVariable(kVkInstanceLayersEnvVar);
+            if (layersEnvVar.empty()) {
+                gfxstream::base::setEnvironmentVariable(kVkInstanceLayersEnvVar, kEnableVVLEnvVar);
+            } else {
+                if (layersEnvVar.find(kEnableVVLEnvVar) == std::string::npos) {
+                    std::stringstream ss;
+                    ss << layersEnvVar << kPathSeparator << kEnableVVLEnvVar;
+                    gfxstream::base::setEnvironmentVariable(kVkInstanceLayersEnvVar, ss.str());
+                }
+            }
+        } else {
+            GFXSTREAM_WARNING("Vulkan validation layer library path not found in %s. Skipping validation layer setup.", vvlPath.c_str());
         }
     }
 

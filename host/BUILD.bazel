@@ -1,9 +1,28 @@
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test", "objc_library")
 load("//:build_variables.bzl", "GFXSTREAM_HOST_COPTS", "GFXSTREAM_HOST_DEFINES")
 
 package(
     default_applicable_licenses = ["//:gfxstream_license"],
     default_visibility = ["//:gfxstream"],
+)
+
+proto_library(
+    name = "gfxstream_backend_proto",
+    srcs = [
+        "virtio_gpu_context_snapshot.proto",
+        "virtio_gpu_frontend_snapshot.proto",
+        "virtio_gpu_resource_snapshot.proto",
+        "virtio_gpu_ring_blob_snapshot.proto",
+        "virtio_gpu_timelines_snapshot.proto",
+    ],
+    strip_import_prefix = "/host",
+)
+
+cc_proto_library(
+    name = "gfxstream_backend_cc_proto",
+    deps = [":gfxstream_backend_proto"],
 )
 
 cc_library(
@@ -35,6 +54,7 @@ cc_library(
     ],
     copts = GFXSTREAM_HOST_COPTS,
     defines = GFXSTREAM_HOST_DEFINES,
+    features = ["-parse_headers"],
     includes = ["include"],
     visibility = ["//visibility:public"],
     deps = [
@@ -190,6 +210,7 @@ cc_library(
     linkstatic = True,
     visibility = ["//visibility:public"],
     deps = [
+        ":gfxstream_backend_cc_proto",
         ":gfxstream_backend_headers",
         ":gfxstream_host_headers",
         "//common/base:gfxstream_common_base",
@@ -220,6 +241,8 @@ cc_library(
         "//third_party/opengl:gfxstream_gles3_headers",
         "//third_party/vulkan:gfxstream_vulkan_headers",
         "//third_party/xcb",
+        "@protobuf",
+        "@protobuf//src/google/protobuf/io",
     ] + select({
         "@platforms//os:macos": [
             ":gfxstream_backend_static-darwin",
@@ -242,6 +265,7 @@ cc_library(
     linkstatic = True,
     visibility = ["//visibility:public"],
     deps = [
+        ":gfxstream_backend_cc_proto",
         ":gfxstream_backend_headers",
         ":gfxstream_backend_static",
         ":gfxstream_host_headers",
@@ -266,6 +290,7 @@ cc_binary(
     linkshared = True,
     visibility = ["//visibility:public"],
     deps = [
+        ":gfxstream_backend_cc_proto",
         ":gfxstream_backend_headers",
         ":gfxstream_backend_static",
         ":gfxstream_host_headers",

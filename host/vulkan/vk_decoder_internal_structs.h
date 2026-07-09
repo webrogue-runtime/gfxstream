@@ -166,7 +166,6 @@ struct MemoryInfo {
     // GLDirectMem info
     bool directMapped = false;
     bool virtioGpuMapped = false;
-    
     uint32_t caching = 0;
     uint64_t guestPhysAddr = 0;
     void* pageAlignedHva = nullptr;
@@ -174,8 +173,10 @@ struct MemoryInfo {
     uint64_t hostmemId = 0;
     VkDevice device = VK_NULL_HANDLE;
     uint32_t memoryIndex = 0;
+#if 0 // WEBROGUE
     // Set if the memory is backed by shared memory.
-    // std::optional<gfxstream::base::SharedMemory> sharedMemory;
+    std::optional<gfxstream::base::SharedMemory> sharedMemory;
+#endif
 
     std::shared_ptr<PrivateMemory> privateMemory;
     // virtio-gpu blobs
@@ -241,6 +242,7 @@ struct DeviceInfo {
     bool emulateTextureEtc2 = false;
     bool emulateTextureAstc = false;
     bool useAstcCpuDecompression = false;
+    bool emulateProtectedMemory = false;
 
     ExternalFenceInfo externalFenceInfo;
     VkPhysicalDevice physicalDevice;
@@ -349,11 +351,19 @@ struct BufferInfo {
     std::shared_ptr<bool> alive{new bool(true)};
 };
 
+struct BufferViewInfo {
+    VkDevice device;
+    VkBufferView boxed = VK_NULL_HANDLE;
+    std::shared_ptr<bool> alive{new bool(true)};
+};
+
 struct ImageInfo {
     VkDevice device;
     VkImage boxed = VK_NULL_HANDLE;
     VkImageCreateInfo imageCreateInfoShallow;
-    // std::unique_ptr<AndroidNativeBufferInfo> anbInfo;
+#if 0 // WEBROGUE
+    std::unique_ptr<AndroidNativeBufferInfo> anbInfo;
+#endif
     // Compression info, only valid if texture needs emulated decompression
     std::unique_ptr<CompressedImageInfo> compressInfo;
     // ColorBuffer, provided via vkAllocateMemory().
@@ -471,6 +481,29 @@ struct DescriptorSetLayoutInfo {
     std::vector<VkDescriptorSetLayoutBinding> bindings;
 };
 
+struct DescriptorUpdateTemplateInfo {
+    VkDescriptorUpdateTemplateCreateInfo createInfo;
+    std::vector<VkDescriptorUpdateTemplateEntry> linearizedTemplateEntries;
+    // Preallocated pData
+    std::vector<uint8_t> data;
+
+    // Offset into `data` for the `VkDescriptorImageInfo`s.
+    size_t imageInfoStart = 0;
+    uint32_t imageInfoCount = 0;
+
+    // Offset into `data` for the `VkDescriptorBufferInfo`s.
+    size_t bufferInfoStart = 0;
+    uint32_t bufferInfoCount = 0;
+
+    // Offset into `data` for the `VkBufferView`s.
+    size_t bufferViewStart = 0;
+    uint32_t bufferViewCount = 0;
+
+    // Offset into `data` for the `VkWriteDescriptorSetInlineUniformBlockEXT`
+    size_t inlineUniformBlockStart = 0;
+    uint32_t inlineUniformBlockCount = 0;
+};
+
 struct DescriptorPoolInfo {
     VkDevice device = 0;
     VkDescriptorPool boxed = 0;
@@ -526,6 +559,10 @@ struct DescriptorSetInfo {
 };
 
 struct ShaderModuleInfo {
+    VkDevice device;
+};
+
+struct SamplerYcbcrConversionInfo {
     VkDevice device;
 };
 
@@ -613,6 +650,7 @@ struct InstanceObjects {
         std::unordered_map<VkFramebuffer, FramebufferInfo> framebuffers;
         std::unordered_map<VkImage, ImageInfo> images;
         std::unordered_map<VkImageView, ImageViewInfo> imageViews;
+        std::unordered_map<VkBufferView, BufferViewInfo> bufferViews;
         std::unordered_map<VkPipeline, PipelineInfo> pipelines;
         std::unordered_map<VkPipelineCache, PipelineCacheInfo> pipelineCaches;
         std::unordered_map<VkPipelineLayout, PipelineLayoutInfo> pipelineLayouts;
@@ -622,6 +660,7 @@ struct InstanceObjects {
         std::unordered_map<VkEvent, EventInfo> events;
         std::unordered_map<VkSemaphore, SemaphoreInfo> semaphores;
         std::unordered_map<VkShaderModule, ShaderModuleInfo> shaderModules;
+        std::unordered_map<VkSamplerYcbcrConversion, SamplerYcbcrConversionInfo> samplerYcbcrConversions;
     };
     std::vector<DeviceObjects> devices;
 };

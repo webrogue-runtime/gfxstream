@@ -103,7 +103,7 @@ class Renderer {
         std::string version;
     };
     virtual HardwareStrings getHardwareStrings() = 0;
-    virtual void getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
+    virtual bool getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
                                               uint32_t* driver_version, uint32_t* api_version,
                                               uint32_t* vendor_id, uint32_t* device_id,
                                               uint32_t* device_type, uint64_t* device_memory) = 0;
@@ -249,6 +249,12 @@ class Renderer {
                                int height,
                                const uint8_t* rgbaData) = 0;
 
+    // setDisplayLayout -
+    //    Set display layout to change position/size of the
+    //    emulation output on the screen.
+    virtual void setDisplayLayout(int screenWidth, int screenHeight,
+                                  const Rect& rect) = 0;
+
     // setMultiDisplay
     //    add/modify/del multi-display window
     virtual void setMultiDisplay(uint32_t id,
@@ -319,11 +325,11 @@ class Renderer {
     // indicates the users wants to snip the entire screen.
     // - |rect|  represents a rectangle within the screen defined by
     // desiredWidth and desiredHeight.
+    static const int GET_SCREENSHOT_RESULT_PIXELS_SIZE = -2;  // Return code to get pixel count
     virtual int getScreenshot(unsigned int nChannels, unsigned int* width, unsigned int* height,
                               uint8_t* pixels, size_t* cPixels, int displayId = 0,
                               int desiredWidth = 0, int desiredHeight = 0, int desiredRotation = 0,
                               Rect rect = {{0, 0}, {0, 0}}) = 0;
-
 
     virtual void preLoad() = 0;
     virtual void postLoad() = 0;

@@ -42,6 +42,7 @@
 #include "goldfish_vk_private_defs.h"
 #include "host/framework_formats.h"
 #include "render-utils/Renderer.h"
+#include "vk_format_support.h"
 #include "vk_utils.h"
 
 #if defined(_WIN32)
@@ -54,6 +55,11 @@ typedef HANDLE VK_EXT_SYNC_HANDLE;
 // External sync objects are fd's on other POSIX systems
 typedef int VK_EXT_SYNC_HANDLE;
 #define VK_EXT_SYNC_HANDLE_INVALID (-1)
+#endif
+
+#ifdef __APPLE__
+// MTLTexture_id or MTLBuffer_id for external resource handles
+typedef void* MTLResource_id;
 #endif
 
 namespace gfxstream {
@@ -105,12 +111,16 @@ class VkEmulation {
         bool enableYcbcrEmulation = false;
         bool guestVulkanOnly = false;
         bool useDedicatedAllocations = false;
+        uint32_t guestVulkanMaxApiVersion = VK_API_VERSION_1_3;
+        bool enableProtectedMemoryEmulation;
     };
     void initFeatures(Features features);
 
     bool isYcbcrEmulationEnabled() const;
 
     bool isEtc2EmulationEnabled() const;
+
+    bool isProtectedMemoryEmulationEnabled() const;
 
     bool deferredCommandsEnabled() const;
     bool createResourcesWithRequirementsEnabled() const;
@@ -120,6 +130,7 @@ class VkEmulation {
     bool supportsExternalFenceCapabilities() const;
     bool supportsSurfaces() const;
     bool supportsMoltenVk() const;
+    bool supportsPortabilityEnumeration() const;
 
     bool supportsGetPhysicalDeviceProperties2() const;
 
@@ -130,11 +141,17 @@ class VkEmulation {
 
     bool supportsPrivateData() const;
 
+    bool supportsFrameBoundary() const;
+
     bool supportsExternalMemoryImport() const;
 
     bool supportsDmaBuf() const;
 
     bool supportsExternalMemoryHostProperties() const;
+
+    bool isSwapchainEnabled() const;
+
+    bool isLavapipe() const;
 
     std::optional<VkPhysicalDeviceRobustness2FeaturesEXT> getRobustness2Features() const;
 
@@ -160,9 +177,11 @@ class VkEmulation {
 
     gfxstream::host::RenderDocWithMultipleVkInstances* getRenderDoc();
 
-    // Compositor* getCompositor();
+#if 0 // WEBROGUE
+    Compositor* getCompositor();
 
-    // DisplayVk* getDisplay();
+    DisplayVk* getDisplay();
+#endif
 
     UdmabufCreator* getUdmabufCreator();
 
@@ -170,10 +189,12 @@ class VkEmulation {
 
     std::string getGpuVendor() const;
     std::string getGpuName() const;
+    std::string getGpuDriverVersion() const;
+    std::string getGpuDriverInfo() const;
     std::string getGpuVersionString() const;
     std::string getInstanceExtensionsString() const;
     std::string getDeviceExtensionsString() const;
-    void getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
+    bool getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
                                       uint32_t* driver_version, uint32_t* api_version,
                                       uint32_t* vendor_id, uint32_t* device_id,
                                       uint32_t* device_type, uint64_t* device_memory);
@@ -188,9 +209,6 @@ class VkEmulation {
     VkExternalMemoryHandleTypeFlagBits getDefaultExternalMemoryHandleType();
     void appendExternalMemoryModeDeviceExtensions(std::vector<const char*>& outDeviceExtensions);
     ExternalMemory::Mode getExternalMemoryMode() const;
-    bool supportsExternalMemoryMetal() {
-        return (getExternalMemoryMode() == ExternalMemory::Mode::Metal);
-    }
     bool supportsExternalMemory() {
         return (getExternalMemoryMode() != ExternalMemory::Mode::NotSupported);
     }
@@ -229,7 +247,6 @@ class VkEmulation {
         uint32_t typeIndex;
 
         // Output fields
-        uint32_t id = 0;
         VkDeviceMemory memory = VK_NULL_HANDLE;
 
         // host-mapping fields
@@ -251,6 +268,12 @@ class VkEmulation {
         // This is used as an external handle with ExternalMemory::Mode::Metal
         MTLResource_id externalMetalHandle = nullptr;
 #endif
+#if defined(__QNX__)
+        // Note: The stream handle is the parent of the buffer handle
+        screen_stream_t qnxScreenStreamHandle = nullptr;
+        screen_buffer_t qnxScreenBufferHandle = nullptr;
+#endif
+
         // Used with ExternalMemory::Mode::HostAllocation
         // TODO: refactor to be able to change handle type based on external memory mode
         // and move it into ExternalHandleInfo to support external memory exports or use
@@ -259,17 +282,6 @@ class VkEmulation {
 
         bool dedicatedAllocation = false;
     };
-
-    bool allocExternalMemory(
-        VulkanDispatch* vk, ExternalMemoryInfo* info,
-        gfxstream::base::Optional<uint64_t> deviceAlignment = gfxstream::base::kNullopt,
-        gfxstream::base::Optional<VkBuffer> bufferForDedicatedAllocation = gfxstream::base::kNullopt,
-        gfxstream::base::Optional<VkImage> imageForDedicatedAllocation = gfxstream::base::kNullopt);
-
-    bool importExternalMemory(VulkanDispatch* vk, VkDevice targetDevice,
-                              const ExternalMemoryInfo* info,
-                              VkMemoryDedicatedAllocateInfo* dedicatedAllocInfo,
-                              VkDeviceMemory* out);
 
     enum class VulkanMode {
         // Default: ColorBuffers can still be used with the existing GL-based
@@ -327,6 +339,7 @@ class VkEmulation {
         VkImage image = VK_NULL_HANDLE;
         VkImageView imageView = VK_NULL_HANDLE;
         VkImageCreateInfo imageCreateInfoShallow = {};
+        VkMemoryRequirements imageMemReqs = {};
 
         VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         uint32_t currentQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
@@ -336,6 +349,20 @@ class VkEmulation {
 
         VulkanMode vulkanMode = VulkanMode::Default;
     };
+
+    bool allocExternalMemory(
+        VulkanDispatch* vk, ExternalMemoryInfo* info,
+        gfxstream::base::Optional<uint64_t> deviceAlignment = gfxstream::base::kNullopt,
+        gfxstream::base::Optional<VkBuffer> bufferForDedicatedAllocation =
+            gfxstream::base::kNullopt,
+        gfxstream::base::Optional<VkImage> imageForDedicatedAllocation = gfxstream::base::kNullopt,
+        gfxstream::base::Optional<ColorBufferInfo*> colorBufferInfo = gfxstream::base::kNullopt);
+
+    bool importExternalMemory(VulkanDispatch* vk, VkDevice targetDevice,
+                              const ExternalMemoryInfo* info,
+                              VkMemoryDedicatedAllocateInfo* dedicatedAllocInfo,
+                              VkDeviceMemory* out);
+
     std::optional<VkEmulation::ColorBufferInfo> getColorBufferInfo(uint32_t colorBufferHandle);
 
     struct BufferInfo {
@@ -357,6 +384,9 @@ class VkEmulation {
     void* getColorBufferHostPointer(uint32_t colorBuffer);
 #ifdef __APPLE__
     MTLResource_id getColorBufferMetalMemoryHandle(uint32_t colorBufferHandle);
+#endif
+#if defined(__QNX__)
+    screen_buffer_t getColorBufferScreenBufferQnxHandle(uint32_t colorBufferHandle);
 #endif
 
     struct VkColorBufferMemoryExport {
@@ -420,38 +450,28 @@ class VkEmulation {
 
     VkImageLayout getColorBufferCurrentLayout(uint32_t colorBufferHandle);
 
+    bool needsImageLayoutAdjustment() const;
+    VkImageLayout adjustImageLayout(VkImageLayout layout) const;
+
     void releaseColorBufferForGuestUse(uint32_t colorBufferHandle);
 
     std::unique_ptr<BorrowedImageInfoVk> borrowColorBufferForComposition(uint32_t colorBufferHandle,
                                                                          bool colorBufferIsTarget);
     std::unique_ptr<BorrowedImageInfoVk> borrowColorBufferForDisplay(uint32_t colorBufferHandle);
 
+    void applyApiVersionLimits(uint32_t& apiVersion) const {
+        if (apiVersion > mGuestVulkanMaxApiVersion) {
+            apiVersion = mGuestVulkanMaxApiVersion;
+        }
+    }
+
+    uint32_t vulkanInstanceVersion() const;
+
    private:
     VkEmulation() = default;
 
     std::optional<host::RepresentativeColorBufferMemoryTypeInfo>
     findRepresentativeColorBufferMemoryTypeIndexLocked() REQUIRES(mMutex);
-
-    struct ImageSupportInfo {
-        // Input parameters
-        VkFormat format;
-        VkImageType type;
-        VkImageTiling tiling;
-        VkImageUsageFlags usageFlags;
-        VkImageCreateFlags createFlags;
-
-        // Output parameters
-        bool supported = false;
-        bool supportsExternalMemory = false;
-        bool requiresDedicatedAllocation = false;
-
-        // Keep the raw output around.
-        VkFormatProperties2 formatProps2;
-        VkImageFormatProperties2 imageFormatProps2;
-        VkExternalImageFormatProperties extFormatProps;
-    };
-
-    static std::vector<VkEmulation::ImageSupportInfo> getBasicImageSupportList();
 
     // For a given ImageSupportInfo, populates usageWithExternalHandles and
     // requiresDedicatedAllocation. memoryTypeBits are populated later once the
@@ -471,12 +491,15 @@ class VkEmulation {
         bool supportsDmaBuf = false;
         bool supportsDriverProperties = false;
         bool supportsExternalMemoryHostProps = false;
+        bool supportsSwapchain = false;
+        bool isLavapipe = false;
         bool hasSamplerYcbcrConversionExtension = false;
         bool supportsSamplerYcbcrConversion = false;
         bool glInteropSupported = false;
         bool hasNvidiaDeviceDiagnosticCheckpointsExtension = false;
         bool supportsNvidiaDeviceDiagnosticCheckpoints = false;
         bool supportsPrivateData = false;
+        bool supportsFrameBoundary = false;
 
         std::vector<VkExtensionProperties> extensions;
 
@@ -531,9 +554,6 @@ class VkEmulation {
                                           uint32_t w, uint32_t h, const void* pixels,
                                           size_t inputPixelsSize) REQUIRES(mMutex);
 
-    bool updateMemReqsForExtMem(std::optional<ExternalHandleInfo> extMemHandleInfo,
-                                VkMemoryRequirements* pMemReqs);
-
     std::tuple<VkCommandBuffer, VkFence> allocateQueueTransferCommandBufferLocked() REQUIRES(mMutex);
 
     void freeExternalMemoryLocked(VulkanDispatch* vk, ExternalMemoryInfo* info) REQUIRES(mMutex);
@@ -541,11 +561,15 @@ class VkEmulation {
     bool readColorBufferPixelsScaledGpu(uint32_t colorBufferHandle, int pixelsWidth,
                                         int pixelsHeight, GFXSTREAM_ROTATION pixelsRotation,
                                         const Rect& rect, GfxstreamFormat pixelsFormat,
-                                        void* outPixels, const std::optional<std::array<float, 16>>& colorTransform);
+                                        void* outPixels,
+                                        const std::optional<std::array<float, 16>>& colorTransform);
     bool readColorBufferPixelsScaledCpu(uint32_t colorBufferHandle, int pixelsWidth,
                                         int pixelsHeight, GFXSTREAM_ROTATION pixelsRotation,
                                         const Rect& rect, GfxstreamFormat pixelsFormat,
-                                        void* outPixels, const std::optional<std::array<float, 16>>& colorTransform);
+                                        void* outPixels,
+                                        const std::optional<std::array<float, 16>>& colorTransform);
+
+    void setFeatures(const gfxstream::host::FeatureSet& features);
 
     std::mutex mMutex;
 
@@ -581,8 +605,16 @@ class VkEmulation {
 
     bool mUseDedicatedAllocations = false;
 
+    // This represents the maximum vulkan api version that should be reported to the guest and is
+    // not related to the host vulkan level available or used.
+    uint32_t mGuestVulkanMaxApiVersion = VK_API_VERSION_1_3;
+
+    bool mEnableProtectedMemoryEmulation = true;
+    bool mSwapchainEnabled = false;
+
     // Instance and device for creating the system-wide shareable objects.
     VkInstance mInstance = VK_NULL_HANDLE;
+    uint32_t mVulkanApiVersionInUse = 0;
     uint32_t mVulkanInstanceVersion = 0;
     std::vector<VkExtensionProperties> mInstanceExtensions;
 
@@ -604,8 +636,10 @@ class VkEmulation {
     bool mInstanceSupportsSurface = false;
 #if defined(__APPLE__)
     bool mInstanceSupportsMoltenVK = false;
+    bool mInstanceSupportsPortabilityEnumeration = false;
 #else
     static const bool mInstanceSupportsMoltenVK = false;
+    static const bool mInstanceSupportsPortabilityEnumeration = false;
 #endif
 
     PFN_vkGetPhysicalDeviceImageFormatProperties2KHR mGetImageFormatProperties2Func = nullptr;
@@ -629,7 +663,7 @@ class VkEmulation {
     VkCommandBuffer mCommandBuffer = VK_NULL_HANDLE;
     VkFence mCommandBufferFence = VK_NULL_HANDLE;
 
-    std::vector<ImageSupportInfo> mImageSupportInfo;
+    ImageSupport mImageSupportInfo = ImageSupport::GetDefaultUnpopulatedImageSupport();
 
     vk_util::YcbcrSamplerPool mYcbcrSamplerPool;
 

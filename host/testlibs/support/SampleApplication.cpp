@@ -107,7 +107,7 @@ bool shouldUseHostGpu() {
     if (useHost) {
         set_gfxstream_renderer(SELECTED_RENDERER_HOST);
     } else {
-        set_gfxstream_renderer(SELECTED_RENDERER_SWIFTSHADER_INDIRECT);
+        set_gfxstream_renderer(SELECTED_RENDERER_LAVAPIPE);
     }
 
     return useHost;
@@ -249,7 +249,7 @@ SampleApplication::SampleApplication(int windowWidth, int windowHeight, int refr
     mUseSubWindow = mWindow != nullptr;
 
     FeatureSet features = {};
-    features.EglOnEgl.enabled = !useHostGpu;
+    features.EglOnEgl.setEnabled(!useHostGpu);
 
     FrameBuffer::initialize(mWidth, mHeight, features, mUseSubWindow);
     mFb = FrameBuffer::getFB();

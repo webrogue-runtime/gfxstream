@@ -105,6 +105,11 @@ static const uint64_t kDefaultTimeoutNsecs = 5ULL * 1000ULL * 1000ULL * 1000ULL;
 SyncThread::SyncThread(bool hasGl)
     : gfxstream::base::Thread(gfxstream::base::ThreadFlags::MaskSignals, 512 * 1024),
       mWorkerThreadPool(kNumWorkerThreads,
+                        [](ThreadPool::WorkerId id) {
+                            GFXSTREAM_TRACE_NAME_THREAD(
+                                std::string("Gfxstream SyncThread Worker ") +
+                                std::to_string(id));
+                        },
                         [this](Command&& command, ThreadPool::WorkerId id) {
                             doSyncThreadCmd(std::move(command), id);
                         }),
@@ -338,23 +343,33 @@ void SyncThread::triggerGeneral(FenceCompletionCallback cb, std::string descript
 }
 
 void SyncThread::cleanup() {
-    sendAndWaitForResult(
-        [this](WorkerId workerId) {
 #if GFXSTREAM_ENABLE_HOST_GLES
-            if (mHasGl) {
-                const EGLDispatch* egl = gl::LazyLoadedEGLDispatch::get();
+    if (mHasGl) {
+        // This works fine because ThreadPool::enqueue will distribute the
+        // tasks to workers in a linear order. Otherwise, we'll need to
+        // implement a broadcast event to ensure all threads destroy their
+        // resources correctly out of order.
+        for (uint32_t i = 0; i < kNumWorkerThreads; i++) {
+            sendAndWaitForResult(
+                [this](WorkerId workerId) {
+                    const EGLDispatch* egl = gl::LazyLoadedEGLDispatch::get();
 
-                egl->eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+                    egl->eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
-                egl->eglDestroyContext(mDisplay, mContext[workerId]);
-                egl->eglDestroySurface(mDisplay, mSurface[workerId]);
-                mContext[workerId] = EGL_NO_CONTEXT;
-                mSurface[workerId] = EGL_NO_SURFACE;
-            }
+                    if (mContext[workerId] != EGL_NO_CONTEXT) {
+                        egl->eglDestroyContext(mDisplay, mContext[workerId]);
+                        mContext[workerId] = EGL_NO_CONTEXT;
+                    }
+                    if (mSurface[workerId] != EGL_NO_SURFACE) {
+                        egl->eglDestroySurface(mDisplay, mSurface[workerId]);
+                        mSurface[workerId] = EGL_NO_SURFACE;
+                    }
+                    return 0;
+                },
+                "gl_cleanup");
+        }
+    }
 #endif
-            return 0;
-        },
-        "cleanup");
     DPRINT("signal");
     mLock.lock();
     mExiting = true;
@@ -410,11 +425,6 @@ void SyncThread::sendAsync(std::function<void(WorkerId)> job, std::string descri
 }
 
 void SyncThread::doSyncThreadCmd(Command&& command, WorkerId workerId) {
-    static thread_local std::once_flag sOnceFlag;
-    std::call_once(sOnceFlag, [&] {
-        GFXSTREAM_TRACE_NAME_TRACK(GFXSTREAM_TRACE_TRACK_FOR_CURRENT_THREAD(), "SyncThread");
-    });
-
     std::unique_ptr<std::unordered_map<std::string, std::string>> syncThreadData =
         std::make_unique<std::unordered_map<std::string, std::string>>();
     syncThreadData->insert({{"syncthread_cmd_desc", command.mDescription}});

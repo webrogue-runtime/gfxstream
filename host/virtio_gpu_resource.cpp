@@ -81,15 +81,6 @@ static std::unordered_map<int, struct ResourceFormatInfo> virglFormatInfoMap = {
     {VIRGL_FORMAT_R8_UNORM, {DRM_FORMAT_R8, 1}},
 };
 
-static std::optional<int> DrmFourccToVirglFormat(uint32_t drm_fourcc) {
-    for (auto it : virglFormatInfoMap) {
-        if (it.second.drm_fourcc == drm_fourcc) {
-            return it.first;
-        }
-    }
-    return -1;
-}
-
 static std::optional<struct ResourceFormatInfo> VirglFormatInfo(uint32_t virglFormat) {
     auto it = virglFormatInfoMap.find(virglFormat);
     if (virglFormatInfoMap.end() != it) {
@@ -119,10 +110,41 @@ VirtioGpuResourceType GetResourceType(const struct stream_renderer_resource_crea
         return VirtioGpuResourceType::COLOR_BUFFER;
     }
     if (!(args.bind & VIRGL_BIND_LINEAR)) {
+        // Always treat large single dimensional R8 requests as buffers, even
+        // if they didn't request linear binding
+        const uint32_t largeBufferLimit = 16000;
+        bool shouldUseBuffer = args.width > largeBufferLimit && args.height == 1 &&
+                               args.depth == 1 && args.array_size == 1;
+        if (shouldUseBuffer) {
+            return VirtioGpuResourceType::BUFFER;
+        }
         return VirtioGpuResourceType::COLOR_BUFFER;
     }
 
     return VirtioGpuResourceType::BUFFER;
+}
+
+// Fills `outHandle` from an exported descriptor, consolidating the platform
+// `#ifdef`s: on Android the descriptor is an opaque handle taken by value; on
+// other platforms it is a ManagedDescriptor whose ownership is released to the
+// VMM. Returns 0 on success, -EINVAL if the descriptor could not be obtained.
+int fillExportHandle(struct stream_renderer_handle* outHandle, BlobDescriptorType& descriptorInfo) {
+#ifdef __ANDROID__
+    auto rawDescriptor = descriptorInfo.handle;
+#else
+    auto rawDescriptorOpt = descriptorInfo.descriptor.release();
+    if (!rawDescriptorOpt) {
+        return -EINVAL;
+    }
+    auto rawDescriptor = *rawDescriptorOpt;
+#endif
+#ifdef _WIN32
+    outHandle->os_handle = static_cast<int64_t>(reinterpret_cast<intptr_t>(rawDescriptor));
+#else
+    outHandle->os_handle = static_cast<int64_t>(rawDescriptor);
+#endif
+    outHandle->handle_type = descriptorInfo.streamHandleType;
+    return 0;
 }
 
 }  // namespace
@@ -130,9 +152,9 @@ VirtioGpuResourceType GetResourceType(const struct stream_renderer_resource_crea
 /*static*/
 std::optional<VirtioGpuResource> VirtioGpuResource::Create(
     const struct stream_renderer_resource_create_args* args, struct iovec* iov, uint32_t num_iovs) {
-    GFXSTREAM_DEBUG("resource id: %u", args->handle);
 
     const auto resourceType = GetResourceType(*args);
+    GFXSTREAM_DEBUG("resource id: %u, type: %d", args->handle, (int)resourceType);
     if (resourceType == VirtioGpuResourceType::BLOB) {
         GFXSTREAM_ERROR("Failed to create resource: encountered blob.");
         return std::nullopt;
@@ -141,8 +163,11 @@ std::optional<VirtioGpuResource> VirtioGpuResource::Create(
     if (resourceType == VirtioGpuResourceType::PIPE) {
         // Frontend only resource.
     } else if (resourceType == VirtioGpuResourceType::BUFFER) {
-        FrameBuffer::getFB()->createBufferWithResourceHandle(args->width * args->height,
-                                                             args->handle);
+        if (!FrameBuffer::getFB()->createBufferWithResourceHandle(args->width * args->height,
+                                                                  args->handle)) {
+            GFXSTREAM_ERROR("Failed to create buffer with resource handle %d.", args->handle);
+            return std::nullopt;
+        }
     } else if (resourceType == VirtioGpuResourceType::COLOR_BUFFER) {
         auto formatOpt = ToGfxstreamFormat(args->format);
         if (!formatOpt) {
@@ -151,7 +176,13 @@ std::optional<VirtioGpuResource> VirtioGpuResource::Create(
         }
         auto format = *formatOpt;
 
-        FrameBuffer::getFB()->createColorBufferWithResourceHandle(args->width, args->height, format, args->handle);
+        if (!FrameBuffer::getFB()->createColorBufferWithResourceHandle(args->width, args->height,
+                                                                       format, args->handle)) {
+            const std::string formatString = ToString(format);
+            GFXSTREAM_ERROR("Failed to create color buffer with resource handle %d. (%dx%d, format: %s)",
+                            args->handle, args->width, args->height, formatString.c_str());
+            return std::nullopt;
+        }
         FrameBuffer::getFB()->setGuestManagedColorBufferLifetime(true /* guest manages lifetime */);
         FrameBuffer::getFB()->openColorBuffer(args->handle);
     } else {
@@ -165,79 +196,6 @@ std::optional<VirtioGpuResource> VirtioGpuResource::Create(
     resource.mCreateArgs = *args;
 
     resource.AttachIov(iov, num_iovs);
-
-    return resource;
-}
-
-/*static*/
-std::optional<VirtioGpuResource> VirtioGpuResource::Create(
-    uint32_t res_handle, const struct stream_renderer_handle* import_handle,
-    const struct stream_renderer_import_data* import_data) {
-    GFXSTREAM_DEBUG("resource id: %u", res_handle);
-
-    if (!import_handle || !import_data) {
-        GFXSTREAM_ERROR("Failed to import resource: import_handle/import_data not provided.");
-        return std::nullopt;
-    } else if (!(import_data->flags & STREAM_RENDERER_IMPORT_FLAG_3D_INFO)) {
-        GFXSTREAM_ERROR(
-            "Failed to import resource: stream_renderer_3d_info not provided in import data.");
-        return std::nullopt;
-    }
-
-    struct stream_renderer_resource_create_args internal_create_args = {0};
-    internal_create_args.handle = res_handle;
-    // TODO(aruby@blackberry.com): Determine VIRGL_BIND_LINEAR from info_3d?
-    internal_create_args.bind = VIRGL_BIND_SAMPLER_VIEW | VIRGL_BIND_SCANOUT | VIRGL_BIND_SHARED;
-    internal_create_args.target = PIPE_TEXTURE_2D;
-    // From info_3d
-    auto virglFormat = DrmFourccToVirglFormat(import_data->info_3d.drm_fourcc);
-    if (!virglFormat) {
-        GFXSTREAM_ERROR("No virgl format available for drm_fourcc: %d",
-                        import_data->info_3d.drm_fourcc);
-        return std::nullopt;
-    }
-    internal_create_args.format = *virglFormat;
-    internal_create_args.width = import_data->info_3d.width;
-    internal_create_args.height = import_data->info_3d.height;
-    // Default values
-    internal_create_args.depth = 1;
-    internal_create_args.array_size = 1;
-    internal_create_args.last_level = 0;
-    internal_create_args.nr_samples = 0;
-    internal_create_args.flags = 0;
-
-    const auto resourceType = GetResourceType(internal_create_args);
-    if (resourceType != VirtioGpuResourceType::COLOR_BUFFER) {
-        GFXSTREAM_ERROR(
-            "Failed to create resource with import_handle: arguments resulted in unhandled type. "
-            "Only ColorBuffer resources are supported for import.");
-        return std::nullopt;
-    }
-
-    ExternalObjectManager::get()->addResourceExternalHandleInfo(
-        res_handle, ExternalHandleInfo{
-                        .handle = import_handle->os_handle,
-                        .streamHandleType = import_handle->handle_type,
-                    });
-
-    auto formatOpt = ToGfxstreamFormat(internal_create_args.format);
-    if (!formatOpt) {
-        GFXSTREAM_ERROR("Failed to create resource with import_handle: unsupported format %d",
-                        internal_create_args.format);
-        return std::nullopt;
-    }
-    auto format = *formatOpt;
-
-    FrameBuffer::getFB()->createColorBufferWithResourceHandle(
-        internal_create_args.width, internal_create_args.height, format,
-        internal_create_args.handle);
-    FrameBuffer::getFB()->setGuestManagedColorBufferLifetime(true /* guest manages lifetime */);
-    FrameBuffer::getFB()->openColorBuffer(internal_create_args.handle);
-
-    VirtioGpuResource resource;
-    resource.mId = res_handle;
-    resource.mResourceType = resourceType;
-    resource.mCreateArgs = internal_create_args;
 
     return resource;
 }
@@ -283,7 +241,7 @@ std::optional<VirtioGpuResource> VirtioGpuResource::Create(
 
     if (createBlobArgs->blob_id == 0) {
         RingBlobMemory memory;
-        if (features.ExternalBlob.enabled) {
+        if (features.ExternalBlob.enabled()) {
             memory = RingBlob::CreateWithShmem(resourceId, createBlobArgs->size);
         } else {
             memory = RingBlob::CreateWithHostMemory(resourceId, createBlobArgs->size, pageSize);
@@ -293,7 +251,7 @@ std::optional<VirtioGpuResource> VirtioGpuResource::Create(
             return std::nullopt;
         }
         resource.mBlobMemory.emplace(std::move(memory));
-    } else if (features.ExternalBlob.enabled) {
+    } else if (features.ExternalBlob.enabled()) {
         if (createBlobArgs->blob_mem == STREAM_BLOB_MEM_GUEST &&
             (createBlobArgs->blob_flags & STREAM_BLOB_FLAG_CREATE_GUEST_HANDLE)) {
 #if defined(__ANDROID__)
@@ -597,6 +555,12 @@ int VirtioGpuResource::ReadFromPipeToLinear(uint64_t offset, stream_renderer_box
         return -EINVAL;
     }
 
+    size_t requiredSize = box->x + box->w;
+    if (mLinear.size() < requiredSize) {
+        GFXSTREAM_ERROR("mLinear is too small! size: %zu, required: %zu", mLinear.size(), requiredSize);
+        return -EINVAL;
+    }
+
     return mHostPipe->TransferFromHost(mLinear.data() + box->x, box->w);
 }
 
@@ -628,6 +592,12 @@ int VirtioGpuResource::ReadFromBufferToLinear(uint64_t offset, stream_renderer_b
 
     if (!mCreateArgs) {
         GFXSTREAM_ERROR("Failed to transfer: resource %d missing args.", mId);
+        return -EINVAL;
+    }
+
+    size_t requiredSize = mCreateArgs->width * mCreateArgs->height;
+    if (mLinear.size() < requiredSize) {
+        GFXSTREAM_ERROR("mLinear is too small! size: %zu, required: %zu", mLinear.size(), requiredSize);
         return -EINVAL;
     }
 
@@ -670,6 +640,13 @@ int VirtioGpuResource::ReadFromColorBufferToLinear(uint64_t offset, stream_rende
     }
     auto format = *formatOpt;
 
+    size_t requiredSize = GetTransferSize(mCreateArgs->format, mCreateArgs->width, mCreateArgs->height,
+                                          0, 0, mCreateArgs->width, mCreateArgs->height);
+    if (mLinear.size() < requiredSize) {
+        GFXSTREAM_ERROR("mLinear is too small! size: %zu, required: %zu", mLinear.size(), requiredSize);
+        return -EINVAL;
+    }
+
     // We always xfer the whole thing again from GL
     // since it's fiddly to calc / copy-out subregions
     if (IsYuvFormat(format)) {
@@ -678,8 +655,8 @@ int VirtioGpuResource::ReadFromColorBufferToLinear(uint64_t offset, stream_rende
                                                  mLinear.size());
     } else {
         FrameBuffer::getFB()->readColorBuffer(mCreateArgs->handle, 0, 0, mCreateArgs->width,
-                                              mCreateArgs->height, format,
-                                              mLinear.data());
+                                              mCreateArgs->height, format, mLinear.data(),
+                                              mLinear.size());
     }
 
     return 0;
@@ -810,6 +787,16 @@ int VirtioGpuResource::TransferWithIov(uint64_t offset, const stream_renderer_bo
 }
 
 int VirtioGpuResource::ExportBlob(struct stream_renderer_handle* outHandle) {
+    // For non-blob COLOR_BUFFER resources (CREATE_3D path), there is no mBlobMemory
+    // set. Attempt to export the ColorBuffer's external memory.
+    if (!mBlobMemory && mResourceType == VirtioGpuResourceType::COLOR_BUFFER) {
+        auto descriptorInfoOpt = FrameBuffer::getFB()->exportColorBuffer(mId);
+        if (!descriptorInfoOpt) {
+            return -EINVAL;
+        }
+        return fillExportHandle(outHandle, descriptorInfoOpt->descriptorInfo);
+    }
+
     if (!mBlobMemory) {
         return -EINVAL;
     }
@@ -831,24 +818,12 @@ int VirtioGpuResource::ExportBlob(struct stream_renderer_handle* outHandle) {
         return 0;
     } else if (std::holds_alternative<ExternalMemoryInfo>(*mBlobMemory)) {
         auto& memory = std::get<ExternalMemoryInfo>(*mBlobMemory);
-#ifdef __ANDROID__
-        auto rawDescriptor = memory->descriptorInfo.handle;
-#else
-        auto rawDescriptorOpt = memory->descriptorInfo.descriptor.release();
-        if (!rawDescriptorOpt) {
+        int ret = fillExportHandle(outHandle, memory->descriptorInfo);
+        if (ret != 0) {
             GFXSTREAM_ERROR("failed to export blob for resource %u: failed to get raw handle.",
                             mId);
-            return -EINVAL;
         }
-        auto rawDescriptor = *rawDescriptorOpt;
-#endif
-#ifdef _WIN32
-        outHandle->os_handle = static_cast<int64_t>(reinterpret_cast<intptr_t>(rawDescriptor));
-#else
-        outHandle->os_handle = static_cast<int64_t>(rawDescriptor);
-#endif
-        outHandle->handle_type = memory->descriptorInfo.streamHandleType;
-        return 0;
+        return ret;
     }
 
     return -EINVAL;

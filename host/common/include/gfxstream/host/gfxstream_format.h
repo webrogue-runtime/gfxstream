@@ -71,6 +71,7 @@ enum class GfxstreamFormat : uint32_t {
      * Corresponding formats:
      *   Android: AHARDWAREBUFFER_FORMAT_B8G8R8A8_UNORM (deprecated)
      *   Vulkan: VK_FORMAT_B8G8R8A8_UNORM
+     *   OpenGL ES: GL_BGRA8_EXT
      */
     B8G8R8A8_UNORM,
 
@@ -242,6 +243,18 @@ enum class GfxstreamFormat : uint32_t {
     P010,
 
     /**
+     * P210 is a 4:2:2 YCbCr semiplanar format comprised of a WxH Y plane
+     * followed by a WxH CbCr plane. Each sample is represented by a 16-bit
+     * little-endian value, with the lower 6 bits set to zero.
+     *
+     * Corresponding formats:
+     *   Android: AHARDWAREBUFFER_FORMAT_YCBCR_P210
+     *   Vulkan: VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16
+     *   OpenGL ES: N/A
+     */
+    P210,
+
+    /**
      * Corresponding formats:
      *   Android: AHARDWAREBUFFER_FORMAT_R8_UNORM
      *   Vulkan: VK_FORMAT_R8_UNORM
@@ -256,6 +269,20 @@ enum class GfxstreamFormat : uint32_t {
      *   OpenGL ES: GL_R16_EXT
      */
     R16_UNORM,
+
+    /**
+     * Corresponding formats:
+     *   Android: N/A
+     *   Vulkan: VK_FORMAT_A1B5G5R5_UNORM_PACK16_KHR
+     */
+    A1B5G5R5_UNORM,
+
+    /**
+     * Corresponding formats:
+     *   Android: N/A
+     *   Vulkan: VK_FORMAT_A8_UNORM_KHR
+     */
+    A8_UNORM,
 };
 
 inline bool IsYuvFormat(GfxstreamFormat format) {
@@ -263,6 +290,7 @@ inline bool IsYuvFormat(GfxstreamFormat format) {
         case GfxstreamFormat::NV12:
         case GfxstreamFormat::NV21:
         case GfxstreamFormat::P010:
+        case GfxstreamFormat::P210:
         case GfxstreamFormat::YV21:
         case GfxstreamFormat::YV12:
             return true;
@@ -288,6 +316,8 @@ inline bool IsYuvFormat(GfxstreamFormat format) {
         case GfxstreamFormat::R8G8B8A8_UNORM:
         case GfxstreamFormat::R8G8B8X8_UNORM:
         case GfxstreamFormat::S8_UINT:
+        case GfxstreamFormat::A1B5G5R5_UNORM:
+        case GfxstreamFormat::A8_UNORM:
         case GfxstreamFormat::UNKNOWN:
             return false;
     }
@@ -298,6 +328,7 @@ inline bool IsInterleavedChromaYuvFormat(GfxstreamFormat format) {
         case GfxstreamFormat::NV12:
         case GfxstreamFormat::NV21:
         case GfxstreamFormat::P010:
+        case GfxstreamFormat::P210:
             return true;
         case GfxstreamFormat::B10G10R10A2_UNORM:
         case GfxstreamFormat::B4G4R4A4_UNORM:
@@ -324,6 +355,8 @@ inline bool IsInterleavedChromaYuvFormat(GfxstreamFormat format) {
         case GfxstreamFormat::UNKNOWN:
         case GfxstreamFormat::YV21:
         case GfxstreamFormat::YV12:
+        case GfxstreamFormat::A1B5G5R5_UNORM:
+        case GfxstreamFormat::A8_UNORM:
             return false;
     }
 }
@@ -342,6 +375,7 @@ inline std::optional<YuvChromaOrdering> GetYuvChromaOrdering(GfxstreamFormat for
         case GfxstreamFormat::YV12:
         case GfxstreamFormat::NV21:
         case GfxstreamFormat::P010:
+        case GfxstreamFormat::P210:
             return YuvChromaOrdering::VU;
         case GfxstreamFormat::B10G10R10A2_UNORM:
         case GfxstreamFormat::B4G4R4A4_UNORM:
@@ -366,6 +400,8 @@ inline std::optional<YuvChromaOrdering> GetYuvChromaOrdering(GfxstreamFormat for
         case GfxstreamFormat::R8G8B8X8_UNORM:
         case GfxstreamFormat::S8_UINT:
         case GfxstreamFormat::UNKNOWN:
+        case GfxstreamFormat::A1B5G5R5_UNORM:
+        case GfxstreamFormat::A8_UNORM:
             return std::nullopt;
     }
 }
@@ -406,6 +442,8 @@ inline std::string ToString(GfxstreamFormat format) {
             return "NV21";
         case GfxstreamFormat::P010:
             return "P010";
+        case GfxstreamFormat::P210:
+            return "P210";
         case GfxstreamFormat::R4G4B4A4_UNORM:
             return "R4G4B4A4_UNORM";
         case GfxstreamFormat::R10G10B10A2_UNORM:
@@ -436,6 +474,10 @@ inline std::string ToString(GfxstreamFormat format) {
             return "YV21";
         case GfxstreamFormat::YV12:
             return "YV12";
+        case GfxstreamFormat::A1B5G5R5_UNORM:
+            return "A1B5G5R5_UNORM_PACK16";
+        case GfxstreamFormat::A8_UNORM:
+            return "A8_UNORM";
     }
 }
 
@@ -466,6 +508,7 @@ inline std::optional<uint32_t> GetBpp(GfxstreamFormat format) {
         case GfxstreamFormat::NV21:
             return std::nullopt;
         case GfxstreamFormat::P010:
+        case GfxstreamFormat::P210:
             return std::nullopt;
         case GfxstreamFormat::R10G10B10A2_UNORM:
             return 4;
@@ -497,6 +540,10 @@ inline std::optional<uint32_t> GetBpp(GfxstreamFormat format) {
             return std::nullopt;
         case GfxstreamFormat::YV12:
             return std::nullopt;
+        case GfxstreamFormat::A1B5G5R5_UNORM:
+            return 2;
+        case GfxstreamFormat::A8_UNORM:
+            return 1;
     }
 }
 

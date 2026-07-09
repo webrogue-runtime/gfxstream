@@ -44,6 +44,10 @@
 #include "vulkan/vk_common_operations.h"
 #include "vulkan/vk_decoder_global_state.h"
 
+// defined in guest/goldfish_sync.h
+#define GOLDFISH_SYNC_VULKAN_SEMAPHORE_SYNC 0x00000001
+#define GOLDFISH_SYNC_VULKAN_QSRI 0x00000002
+
 namespace gfxstream {
 namespace host {
 
@@ -108,7 +112,7 @@ public:
         // in many situations
         // (switching camera sides, exiting benchmark apps, etc).
         // So, we put GrallocSync under the feature control.
-        mEnabled = FrameBuffer::getFB()->getFeatures().GrallocSync.enabled;
+        mEnabled = FrameBuffer::getFB()->getFeatures().GrallocSync.enabled();
 
         // There are two potential tricky situations to handle:
         // a. Multiple users of gralloc buffers that all want to
@@ -311,7 +315,8 @@ static EGLint rcQueryEGLString(EGLenum name, void* buffer, EGLint bufferSize)
 }
 
 static bool shouldEnableAsyncSwap(const gfxstream::host::FeatureSet& features) {
-    return features.GlAsyncSwap.enabled &&
+     return features.GlAsyncSwap.enabled() &&
+            !features.VulkanNativeSwapchain.enabled() &&
            gfxstream_sync_device_exists() &&
            sizeof(void*) == 8;
 }
@@ -319,7 +324,7 @@ static bool shouldEnableAsyncSwap(const gfxstream::host::FeatureSet& features) {
 static bool shouldEnableVulkan(const gfxstream::host::FeatureSet& features) {
     // TODO: Restrict further to devices supporting external memory.
     FrameBuffer* fb = FrameBuffer::getFB();
-    return features.Vulkan.enabled && fb->hasEmulationVk() &&
+    return features.Vulkan.enabled() && fb->hasEmulationVk() &&
            vk::VkDecoderGlobalState::get()->getHostFeatureSupport().supportsVulkan;
 }
 
@@ -336,7 +341,7 @@ static bool shouldEnableCreateResourcesWithRequirements() {
 }
 
 static bool shouldEnableVulkanShaderFloat16Int8(const gfxstream::host::FeatureSet& features) {
-    return shouldEnableVulkan(features) && features.VulkanShaderFloat16Int8.enabled;
+    return shouldEnableVulkan(features) && features.VulkanShaderFloat16Int8.enabled();
 }
 
 static bool shouldEnableAsyncQueueSubmit(const gfxstream::host::FeatureSet& features) {
@@ -345,9 +350,9 @@ static bool shouldEnableAsyncQueueSubmit(const gfxstream::host::FeatureSet& feat
 
 static bool shouldEnableVulkanAsyncQsri(const gfxstream::host::FeatureSet& features) {
     return shouldEnableVulkan(features) &&
-        (features.GlAsyncSwap.enabled ||
-         (features.VirtioGpuNativeSync.enabled &&
-          features.VirtioGpuFenceContexts.enabled));
+        (features.GlAsyncSwap.enabled() ||
+         (features.VirtioGpuNativeSync.enabled() &&
+          features.VirtioGpuFenceContexts.enabled()));
 }
 
 static bool shouldEnableVsyncGatedSyncFences(const gfxstream::host::FeatureSet& features) {
@@ -368,13 +373,13 @@ const char* maxVersionToFeatureString(GLESDispatchMaxVersion version) {
 }
 
 static bool shouldEnableQueueSubmitWithCommands(const gfxstream::host::FeatureSet& features) {
-    return shouldEnableVulkan(features) && features.VulkanQueueSubmitWithCommands.enabled;
+    return shouldEnableVulkan(features) && features.VulkanQueueSubmitWithCommands.enabled();
 }
 
 static bool shouldEnableBatchedDescriptorSetUpdate(const gfxstream::host::FeatureSet& features) {
     return shouldEnableVulkan(features) &&
         shouldEnableQueueSubmitWithCommands(features) &&
-        features.VulkanBatchedDescriptorSetUpdate.enabled;
+        features.VulkanBatchedDescriptorSetUpdate.enabled();
 }
 
 // OpenGL ES 3.x support involves changing the GL_VERSION string, which is
@@ -435,28 +440,28 @@ static EGLint rcGetGLString(EGLenum name, void* buffer, EGLint bufferSize) {
     }
 
     const gfxstream::host::FeatureSet& features = fb->getFeatures();
-    bool isChecksumEnabled = features.GlPipeChecksum.enabled;
+    bool isChecksumEnabled = features.GlPipeChecksum.enabled();
     bool asyncSwapEnabled = shouldEnableAsyncSwap(features);
-    bool virtioGpuNativeSyncEnabled = features.VirtioGpuNativeSync.enabled;
-    bool dma1Enabled = features.GlDma.enabled;
-    bool dma2Enabled = features.GlDma2.enabled;
-    bool directMemEnabled = features.GlDirectMem.enabled;
-    bool hostCompositionEnabled = features.HostComposition.enabled;
+    bool virtioGpuNativeSyncEnabled = features.VirtioGpuNativeSync.enabled();
+    bool dma1Enabled = features.GlDma.enabled();
+    bool dma2Enabled = features.GlDma2.enabled();
+    bool directMemEnabled = features.GlDirectMem.enabled();
+    bool hostCompositionEnabled = features.HostComposition.enabled();
     bool vulkanEnabled = shouldEnableVulkan(features);
     bool deferredVulkanCommandsEnabled =
         shouldEnableVulkan(features) && shouldEnableDeferredVulkanCommands();
     bool vulkanNullOptionalStringsEnabled =
-        shouldEnableVulkan(features) && features.VulkanNullOptionalStrings.enabled;
+        shouldEnableVulkan(features) && features.VulkanNullOptionalStrings.enabled();
     bool vulkanCreateResourceWithRequirementsEnabled =
         shouldEnableVulkan(features) && shouldEnableCreateResourcesWithRequirements();
-    bool YUV420888toNV21Enabled = features.Yuv420888ToNv21.enabled;
-    bool YUVCacheEnabled = features.YuvCache.enabled;
-    bool AsyncUnmapBufferEnabled = features.AsyncComposeSupport.enabled;
+    bool YUV420888toNV21Enabled = features.Yuv420888ToNv21.enabled();
+    bool YUVCacheEnabled = features.YuvCache.enabled();
+    bool AsyncUnmapBufferEnabled = features.AsyncComposeSupport.enabled();
     bool vulkanIgnoredHandlesEnabled =
-        shouldEnableVulkan(features) && features.VulkanIgnoredHandles.enabled;
-    bool virtioGpuNextEnabled = features.VirtioGpuNext.enabled;
+        shouldEnableVulkan(features) && features.VulkanIgnoredHandles.enabled();
+    bool virtioGpuNextEnabled = features.VirtioGpuNext.enabled();
     bool hasSharedSlotsHostMemoryAllocatorEnabled =
-        features.HasSharedSlotsHostMemoryAllocator.enabled;
+        features.HasSharedSlotsHostMemoryAllocator.enabled();
     bool vulkanFreeMemorySyncEnabled =
         shouldEnableVulkan(features);
     bool vulkanShaderFloat16Int8Enabled = shouldEnableVulkanShaderFloat16Int8(features);
@@ -466,11 +471,11 @@ static EGLint rcGetGLString(EGLenum name, void* buffer, EGLint bufferSize) {
     bool syncBufferDataEnabled = true;
     bool vulkanAsyncQsri = shouldEnableVulkanAsyncQsri(features);
     bool readColorBufferDma = directMemEnabled && hasSharedSlotsHostMemoryAllocatorEnabled;
-    bool hwcMultiConfigs = features.HwcMultiConfigs.enabled;
+    bool hwcMultiConfigs = features.HwcMultiConfigs.enabled();
     bool hwcColorTransform = true;  // To ensure old host emulators won't advertise the support
 
     if (isChecksumEnabled && name == GL_EXTENSIONS) {
-        glStr += ChecksumCalculatorThreadInfo::getMaxVersionString();
+        glStr += ChecksumCalculator::getMaxVersionStr();
         glStr += " ";
     }
 
@@ -620,7 +625,7 @@ static EGLint rcGetGLString(EGLenum name, void* buffer, EGLint bufferSize) {
         GLESDispatchMaxVersion guestExtVer = GLES_DISPATCH_MAX_VERSION_2;
         if (fb->hasEmulationGl()) {
             GLESDispatchMaxVersion maxVersion = fb->getMaxGlesVersion();
-            if (features.GlesDynamicVersion.enabled) {
+            if (features.GlesDynamicVersion.enabled()) {
                 // If the image is in ES 3 mode, add GL_OES_EGL_image_external_essl3 for better Skia support.
                 glStr += "GL_OES_EGL_image_external_essl3 ";
                 guestExtVer = maxVersion;
@@ -650,7 +655,7 @@ static EGLint rcGetGLString(EGLenum name, void* buffer, EGLint bufferSize) {
         glStr += kHostSideTracing;
         glStr += " ";
 
-        if (features.AsyncComposeSupport.enabled) {
+        if (features.AsyncComposeSupport.enabled()) {
             // Async makecurrent support.
             glStr += kAsyncFrameCommands;
             glStr += " ";
@@ -661,7 +666,7 @@ static EGLint rcGetGLString(EGLenum name, void* buffer, EGLint bufferSize) {
     }
 
     if (name == GL_VERSION) {
-        if (fb->hasEmulationGl() && features.GlesDynamicVersion.enabled) {
+        if (fb->hasEmulationGl() && features.GlesDynamicVersion.enabled()) {
             GLESDispatchMaxVersion maxVersion = fb->getMaxGlesVersion();
             switch (maxVersion) {
             // Underlying GLES implmentation's max version string
@@ -984,17 +989,15 @@ static EGLint rcColorBufferCacheFlush(uint32_t colorBuffer,
     return 0;
 }
 
-static void rcReadColorBuffer(uint32_t colorBuffer,
-                              GLint x, GLint y,
-                              GLint width, GLint height,
-                              GLenum format, GLenum type, void* pixels)
-{
+static void rcReadColorBuffer(uint32_t colorBuffer, GLint x, GLint y, GLint width, GLint height,
+                              GLenum format, GLenum type, void* pixels, uint32_t pixels_size) {
     FrameBuffer* fb = FrameBuffer::getFB();
     if (!fb) {
         return;
     }
 
-    fb->readColorBufferDeprecated(colorBuffer, x, y, width, height, format, type, pixels);
+    fb->readColorBufferDeprecated(colorBuffer, x, y, width, height, format, type, pixels,
+                                  pixels_size);
 }
 
 static int rcUpdateColorBuffer(uint32_t colorBuffer,
@@ -1075,23 +1078,24 @@ static void rcSelectChecksumHelper(uint32_t protocol, uint32_t reserved) {
 static void rcTriggerWait(uint64_t eglsync_ptr,
                           uint64_t thread_ptr,
                           uint64_t timeline) {
-    if (thread_ptr == 1) {
+    if (thread_ptr == GOLDFISH_SYNC_VULKAN_SEMAPHORE_SYNC) {
         // Is vulkan sync fd;
         // just signal right away for now
-        EGLSYNC_DPRINT("vkFence=0x%llx timeline=0x%llx", eglsync_ptr,
+        EGLSYNC_DPRINT("GOLDFISH_SYNC_VULKAN_SEMAPHORE_SYNC - vkFence=0x%llx timeline=0x%llx", eglsync_ptr,
                        thread_ptr, timeline);
         SyncThread::get()->triggerWaitVk(reinterpret_cast<VkFence>(eglsync_ptr),
                                          timeline);
-    } else if (thread_ptr == 2) {
-        EGLSYNC_DPRINT("vkFence=0x%llx timeline=0x%llx", eglsync_ptr,
+    } else if (thread_ptr == GOLDFISH_SYNC_VULKAN_QSRI) {
+        EGLSYNC_DPRINT("GOLDFISH_SYNC_VULKAN_QSRI - VkImage=0x%llx timeline=0x%llx", eglsync_ptr,
                        thread_ptr, timeline);
         SyncThread::get()->triggerWaitVkQsri(reinterpret_cast<VkImage>(eglsync_ptr), timeline);
     } else {
         EmulatedEglFenceSync* fenceSync = EmulatedEglFenceSync::getFromHandle(eglsync_ptr);
         FrameBuffer* fb = FrameBuffer::getFB();
         if (fb && fenceSync && fenceSync->isCompositionFence()) {
-            fb->scheduleVsyncTask([eglsync_ptr, fenceSync, timeline](uint64_t) {
+            fb->scheduleVsyncTask([eglsync_ptr, fenceSync, timeline, thread_ptr](uint64_t) {
                 (void)eglsync_ptr;
+                (void)thread_ptr;
                 EGLSYNC_DPRINT(
                     "vsync: eglsync=0x%llx fenceSync=%p thread_ptr=0x%llx "
                     "timeline=0x%llx",
@@ -1134,7 +1138,7 @@ static void rcCreateSyncKHR(EGLenum type,
                                    outSyncThread);
 
     RenderThreadInfo* tInfo = RenderThreadInfo::get();
-    if (tInfo && outSync && shouldEnableVsyncGatedSyncFences(fb->getFeatures())) {
+    if (fb->hasEmulationGl() && tInfo && outSync && shouldEnableVsyncGatedSyncFences(fb->getFeatures())) {
         auto fenceSync = reinterpret_cast<EmulatedEglFenceSync*>(outSync);
         fenceSync->setIsCompositionFence(tInfo->m_isCompositionThread);
     }
@@ -1351,22 +1355,32 @@ static int rcSetDisplayPose(uint32_t displayId,
     return fb->setDisplayPose(displayId, x, y, w, h);
 }
 
-static int rcGetDisplayColorTransform(uint32_t displayId,
-                            mat4x4_ptr outColorTransform) {
+static int rcGetDisplayColorTransform(uint32_t displayId, mat4x4_ptr outColorTransform,
+                                      uint32_t outColorTransformSize) {
     FrameBuffer* fb = FrameBuffer::getFB();
     if (!fb) {
         GFXSTREAM_WARNING("%s: framebuffer cannot be found!", __func__);
         return -1;
     }
 
+    if (outColorTransformSize != (16 * sizeof(float))) {
+        GFXSTREAM_ERROR("Invalid color transform size: %" PRIu32, outColorTransformSize);
+        return -1;
+    }
+
     return fb->getDisplayColorTransform(displayId, reinterpret_cast<float*>(outColorTransform));
 }
 
-static int rcSetDisplayColorTransform(uint32_t displayId,
-                            const mat4x4_ptr colorTransform) {
+static int rcSetDisplayColorTransform(uint32_t displayId, const mat4x4_ptr colorTransform,
+                                      uint32_t colorTransformSize) {
     FrameBuffer* fb = FrameBuffer::getFB();
     if (!fb) {
         GFXSTREAM_WARNING("%s: framebuffer cannot be found!", __func__);
+        return -1;
+    }
+
+    if (colorTransformSize != (16 * sizeof(float))) {
+        GFXSTREAM_ERROR("Invalid color transform size: %" PRIu32, colorTransformSize);
         return -1;
     }
 

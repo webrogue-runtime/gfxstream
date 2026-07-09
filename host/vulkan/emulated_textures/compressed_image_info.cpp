@@ -799,12 +799,12 @@ VkExtent3D CompressedImageInfo::compressedMipmapExtent(uint32_t level) const {
     return result;
 }
 
-#ifdef min
-#undef min
-#endif
 VkExtent3D CompressedImageInfo::compressedMipmapPortion(const VkExtent3D& origExtent,
                                                         uint32_t level) const {
     VkExtent3D maxExtent = compressedMipmapExtent(level);
+#ifdef min
+#undef min
+#endif
     return {
         .width = std::min(ceil_div(origExtent.width, mBlock.width), maxExtent.width),
         .height = std::min(ceil_div(origExtent.height, mBlock.height), maxExtent.height),

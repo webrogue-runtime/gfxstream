@@ -18,7 +18,6 @@
 
 #include <memory>
 #include <optional>
-#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -94,6 +93,13 @@ class VkDecoderGlobalState {
     void save(gfxstream::Stream* stream);
     void load(gfxstream::Stream* stream, gfxstream::host::GfxApiLogger& gfxLogger);
 #endif
+
+    PFN_vkVoidFunction on_vkGetInstanceProcAddr(gfxstream::base::BumpPool* pool,
+                                                VkSnapshotApiCallHandle apiCallHandle,
+                                                VkInstance instance, const char* pName);
+    PFN_vkVoidFunction on_vkGetDeviceProcAddr(gfxstream::base::BumpPool* pool,
+                                              VkSnapshotApiCallHandle apiCallHandle,
+                                              VkDevice device, const char* pName);
 
     VkResult on_vkEnumerateInstanceVersion(gfxstream::base::BumpPool* pool,
                                            VkSnapshotApiCallHandle apiCallHandle,
@@ -289,10 +295,17 @@ class VkDecoderGlobalState {
                                   VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
                                   const VkImageViewCreateInfo* pCreateInfo,
                                   const VkAllocationCallbacks* pAllocator, VkImageView* pView);
+    void on_vkDestroyImageView(gfxstream::base::BumpPool* pool,
+                               VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                               VkImageView imageView, const VkAllocationCallbacks* pAllocator);
 
-    void on_vkDestroyImageView(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
-                               VkDevice device, VkImageView imageView,
-                               const VkAllocationCallbacks* pAllocator);
+    VkResult on_vkCreateBufferView(gfxstream::base::BumpPool* pool,
+                                   VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                   const VkBufferViewCreateInfo* pCreateInfo,
+                                   const VkAllocationCallbacks* pAllocator, VkBufferView* pView);
+    void on_vkDestroyBufferView(gfxstream::base::BumpPool* pool,
+                                VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                VkBufferView bufferView, const VkAllocationCallbacks* pAllocator);
 
     VkResult on_vkCreateSampler(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
                                 VkDevice device, const VkSamplerCreateInfo* pCreateInfo,
@@ -485,6 +498,25 @@ class VkDecoderGlobalState {
                                   VkSnapshotApiCallHandle apiCallHandle,
                                   VkCommandBuffer commandBuffer,
                                   const VkDependencyInfo* pDependencyInfo);
+
+    void on_vkCmdWaitEvents(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
+                            VkCommandBuffer commandBuffer, uint32_t eventCount,
+                            const VkEvent* pEvents, VkPipelineStageFlags srcStageMask,
+                            VkPipelineStageFlags dstStageMask, uint32_t memoryBarrierCount,
+                            const VkMemoryBarrier* pMemoryBarriers,
+                            uint32_t bufferMemoryBarrierCount,
+                            const VkBufferMemoryBarrier* pBufferMemoryBarriers,
+                            uint32_t imageMemoryBarrierCount,
+                            const VkImageMemoryBarrier* pImageMemoryBarriers);
+
+    void on_vkCmdWaitEvents2(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
+                             VkCommandBuffer commandBuffer, uint32_t eventCount,
+                             const VkEvent* pEvents, const VkDependencyInfo* pDependencyInfos);
+
+    void on_vkCmdWaitEvents2KHR(gfxstream::base::BumpPool* pool,
+                                VkSnapshotApiCallHandle apiCallHandle,
+                                VkCommandBuffer commandBuffer, uint32_t eventCount,
+                                const VkEvent* pEvents, const VkDependencyInfo* pDependencyInfos);
 
     // Do we need to wrap vk(Create|Destroy)Instance to
     // update our maps of VkDevices? Spec suggests no:
@@ -879,6 +911,10 @@ class VkDecoderGlobalState {
     void on_vkTraceAsyncGOOGLE(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
                                uint64_t id);
 
+    void on_vkSetDebugMetadataAsyncGOOGLE(gfxstream::base::BumpPool* pool,
+                                          VkSnapshotApiCallHandle apiCallHandle,
+                                          const VkDebugMetadataGOOGLE* pMetadata);
+
     VkResult on_vkQueuePresentKHR(gfxstream::base::BumpPool* pool,
                                   VkSnapshotApiCallHandle apiCallHandle, VkQueue queue,
                                   const VkPresentInfoKHR* pPresentInfo);
@@ -912,6 +948,51 @@ class VkDecoderGlobalState {
         gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle, VkInstance instance,
         uint32_t* pPhysicalDeviceGroupCount,
         VkPhysicalDeviceGroupProperties* pPhysicalDeviceGroupProperties);
+
+    // VK_EXT_private_data
+    VkResult on_vkCreatePrivateDataSlotEXT(gfxstream::base::BumpPool* pool,
+                                           VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                           const VkPrivateDataSlotCreateInfo* pCreateInfo,
+                                           const VkAllocationCallbacks* pAllocator,
+                                           VkPrivateDataSlot* pPrivateDataSlot);
+    void on_vkDestroyPrivateDataSlotEXT(gfxstream::base::BumpPool* pool,
+                                        VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                        VkPrivateDataSlot privateDataSlot,
+                                        const VkAllocationCallbacks* pAllocator);
+    void on_vkGetPrivateDataEXT(gfxstream::base::BumpPool* pool,
+                                VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                VkObjectType objectType, uint64_t objectHandle,
+                                VkPrivateDataSlot privateDataSlot, uint64_t* pData);
+    VkResult on_vkSetPrivateDataEXT(gfxstream::base::BumpPool* pool,
+                                    VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                    VkObjectType objectType, uint64_t objectHandle,
+                                    VkPrivateDataSlot privateDataSlot, uint64_t data);
+
+    // VK_EXT_private_data in core after VK_VERSION_1_3
+    VkResult on_vkCreatePrivateDataSlot(gfxstream::base::BumpPool* pool,
+                                        VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                        const VkPrivateDataSlotCreateInfo* pCreateInfo,
+                                        const VkAllocationCallbacks* pAllocator,
+                                        VkPrivateDataSlot* pPrivateDataSlot);
+    void on_vkDestroyPrivateDataSlot(gfxstream::base::BumpPool* pool,
+                                     VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                     VkPrivateDataSlot privateDataSlot,
+                                     const VkAllocationCallbacks* pAllocator);
+    void on_vkGetPrivateData(gfxstream::base::BumpPool* pool, VkSnapshotApiCallHandle apiCallHandle,
+                             VkDevice device, VkObjectType objectType, uint64_t objectHandle,
+                             VkPrivateDataSlot privateDataSlot, uint64_t* pData);
+    VkResult on_vkSetPrivateData(gfxstream::base::BumpPool* pool,
+                                 VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                 VkObjectType objectType, uint64_t objectHandle,
+                                 VkPrivateDataSlot privateDataSlot, uint64_t data);
+
+    // VK_EXT_debug_utils
+    VkResult on_vkSetDebugUtilsObjectNameEXT(gfxstream::base::BumpPool* pool,
+                                             VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                             const VkDebugUtilsObjectNameInfoEXT* pNameInfo);
+    VkResult on_vkSetDebugUtilsObjectTagEXT(gfxstream::base::BumpPool* pool,
+                                            VkSnapshotApiCallHandle apiCallHandle, VkDevice device,
+                                            const VkDebugUtilsObjectTagInfoEXT* pTagInfo);
 
     void on_DeviceLost();
 
@@ -949,6 +1030,7 @@ class VkDecoderGlobalState {
                                         VkDeviceSize* size, uint32_t sizeCount, uint32_t* typeIndex,
                                         uint32_t typeIndexCount, uint32_t* typeBits,
                                         uint32_t typeBitsCount);
+
     // Snapshot access
     VkDecoderSnapshot* snapshot();
 

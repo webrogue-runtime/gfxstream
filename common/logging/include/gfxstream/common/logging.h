@@ -56,10 +56,6 @@ void SetGfxstreamLogCallback(GfxstreamLogCallback callback);
 void SetGfxstreamLogLevel(LogLevel level);
 LogLevel GetGfxstreamLogLevel();
 
-#ifndef __PRETTY_FUNCTION__
-#define __PRETTY_FUNCTION__ __FUNCTION__
-#endif
-
 #define GFXSTREAM_LOG_INNER(level, fmt, ...)                                                 \
     gfxstream::host::impl::GfxstreamLog(level, __FILE__, __LINE__, __PRETTY_FUNCTION__, fmt, \
                                         ##__VA_ARGS__)

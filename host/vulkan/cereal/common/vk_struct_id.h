@@ -24,7 +24,7 @@
 #include "vulkan_gfxstream_structure_type.h"
 
 template <class T>
-struct vk_get_vk_struct_id {};
+struct vk_get_vk_struct_id;
 
 #define REGISTER_VK_STRUCT_ID(T, ID)              \
     template <>                                   \
@@ -112,6 +112,8 @@ REGISTER_VK_STRUCT_ID(VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT,
                       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT)
 REGISTER_VK_STRUCT_ID(VkPhysicalDeviceProtectedMemoryFeatures,
                       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES);
+REGISTER_VK_STRUCT_ID(VkPhysicalDeviceProtectedMemoryProperties,
+                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_PROPERTIES);
 REGISTER_VK_STRUCT_ID(VkPhysicalDeviceExternalMemoryHostPropertiesEXT,
                       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT);
 REGISTER_VK_STRUCT_ID(VkPhysicalDevicePrivateDataFeatures,
@@ -166,5 +168,29 @@ REGISTER_VK_STRUCT_ID(VkPhysicalDeviceVulkan12Features,
                       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
 REGISTER_VK_STRUCT_ID(VkPhysicalDeviceVulkan13Features,
                       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
+
+REGISTER_VK_STRUCT_ID(VkDebugMetadataGOOGLE,
+                      VK_STRUCTURE_TYPE_DEBUG_METADATA_GOOGLE);
+REGISTER_VK_STRUCT_ID(VkDebugMetadataGuestProcessNameGOOGLE,
+                      VK_STRUCTURE_TYPE_DEBUG_METADATA_GUEST_PROCESS_NAME_GOOGLE);
+REGISTER_VK_STRUCT_ID(VkDebugMetadataGuestProcessIdGOOGLE,
+                      VK_STRUCTURE_TYPE_DEBUG_METADATA_GUEST_PROCESS_ID_GOOGLE);
+REGISTER_VK_STRUCT_ID(VkDebugMetadataGuestThreadNameGOOGLE,
+                      VK_STRUCTURE_TYPE_DEBUG_METADATA_GUEST_THREAD_NAME_GOOGLE);
+REGISTER_VK_STRUCT_ID(VkDebugMetadataGuestThreadIdGOOGLE,
+                      VK_STRUCTURE_TYPE_DEBUG_METADATA_GUEST_THREAD_ID_GOOGLE);
+
+REGISTER_VK_STRUCT_ID(VkPhysicalDeviceFrameBoundaryFeaturesEXT,
+                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAME_BOUNDARY_FEATURES_EXT);
+REGISTER_VK_STRUCT_ID(VkFrameBoundaryEXT, VK_STRUCTURE_TYPE_FRAME_BOUNDARY_EXT);
+
+REGISTER_VK_STRUCT_ID(VkPhysicalDevicePipelineProtectedAccessFeatures,
+                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROTECTED_ACCESS_FEATURES);
+
+REGISTER_VK_STRUCT_ID(VkPhysicalDeviceMemoryProperties2,
+                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2);
+
+REGISTER_VK_STRUCT_ID(VkPhysicalDeviceMemoryBudgetPropertiesEXT,
+                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT);
 
 #undef REGISTER_VK_STRUCT_ID

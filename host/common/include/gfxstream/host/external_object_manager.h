@@ -53,7 +53,6 @@ namespace host {
 #define STREAM_HANDLE_TYPE_MEM_OPAQUE_WIN32 0x3
 #define STREAM_HANDLE_TYPE_MEM_SHM 0x4
 #define STREAM_HANDLE_TYPE_MEM_ZIRCON 0x5
-#define STREAM_HANDLE_TYPE_MEM_AHB 0x6
 
 #define STREAM_HANDLE_TYPE_SIGNAL_OPAQUE_FD 0x10
 #define STREAM_HANDLE_TYPE_SIGNAL_SYNC_FD 0x20
@@ -63,6 +62,7 @@ namespace host {
 
 #define STREAM_HANDLE_TYPE_PLATFORM_SCREEN_BUFFER_QNX 0x01000000
 #define STREAM_HANDLE_TYPE_PLATFORM_EGL_NATIVE_PIXMAP 0x02000000
+#define STREAM_HANDLE_TYPE_PLATFORM_AHB 0x03000000
 
 typedef int64_t ExternalHandleType;
 
@@ -141,10 +141,6 @@ class ExternalObjectManager {
                                uint32_t streamHandleType);
     std::optional<SyncDescriptorInfo> removeSyncDescriptorInfo(uint32_t ctx_id, uint64_t syncId);
 
-    void addResourceExternalHandleInfo(uint32_t resHandle,
-                                       const ExternalHandleInfo& externalHandleInfo);
-    std::optional<ExternalHandleInfo> removeResourceExternalHandleInfo(uint32_t resHandle);
-
    private:
     // Only for pairs of std::hash-able types for simplicity.
     // You can of course template this struct to allow other hash functions
@@ -167,8 +163,6 @@ class ExternalObjectManager {
         mBlobDescriptorInfos GUARDED_BY(mMutex);
     std::unordered_map<std::pair<uint32_t, uint64_t>, SyncDescriptorInfo, pair_hash>
         mSyncDescriptorInfos GUARDED_BY(mMutex);
-    std::unordered_map<uint32_t, ExternalHandleInfo> mResourceExternalHandleInfos
-        GUARDED_BY(mMutex);
 
     DISALLOW_COPY_ASSIGN_AND_MOVE(ExternalObjectManager);
 };

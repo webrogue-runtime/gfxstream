@@ -75,7 +75,7 @@ static int gettimeofday(struct timeval *tp, void *tzp)
 		tp->tv_sec = (long) (time64 / 1000000ULL);
 		tp->tv_usec = (long) (time64 % 1000000ULL);
 	}
-	
+
 	/* The gettimeofday() function returns 0 and no value is reserved to indicate an error. */
 	return 0;
 }

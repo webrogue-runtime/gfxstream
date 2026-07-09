@@ -17,12 +17,7 @@
 #include "gfxstream/system/System.h"
 
 #include <CoreFoundation/CoreFoundation.h>
-//#include <IOKit/IOBSD.h>
 #include <IOKit/IOKitLib.h>
-//#include <AppKit/AppKit.h>
-
-//#include <IOKit/kext/KextManager.h>
-//#include <IOKit/storage/IOBlockStorageDevice.h>
 
 #import <Foundation/Foundation.h>
 #import <Foundation/NSProcessInfo.h>
@@ -80,6 +75,5 @@ void cpuUsageCurrentThread_macImpl(
 
     mach_port_deallocate(mach_task_self(), thread);
 }
-
 }  // namespace base
 }  // namespace gfxstream
