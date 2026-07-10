@@ -167,6 +167,9 @@ const ImageSupportInfo* ImageSupport::GetSupportedInfo(VkFormat format) const {
     return nullptr;
 }
 
+#ifdef max
+#undef max
+#endif
 std::optional<uint32_t> ImageSupport::GetNumberOfNeededCombinedImageSamplerDescriptors(VkFormat format) const {
     if (!formatRequiresSamplerYcbcrConversion(format)) {
         return 1;
