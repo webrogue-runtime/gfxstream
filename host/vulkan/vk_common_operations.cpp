@@ -786,6 +786,31 @@ std::unique_ptr<VkEmulation> VkEmulation::create(VulkanDispatch* gvk,
     emulation->mGvk = gvk;
     emulation->setFeatures(features);
 
+    VkApplicationInfo appInfo = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pNext = 0,
+        .pApplicationName = "AEMU",
+        .applicationVersion = 1,
+        .pEngineName = "AEMU",
+        .engineVersion = 1,
+        .apiVersion = VK_MAKE_VERSION(1, 0, 0),
+    };
+
+    uint32_t maxInstanceVersion = VK_VERSION_1_0;
+    if (gvk->vkEnumerateInstanceVersion) {
+        VkResult res = gvk->vkEnumerateInstanceVersion(&maxInstanceVersion);
+        GFXSTREAM_DEBUG("Global loader has instance version = %d.%d.%d",
+                    VK_API_VERSION_MAJOR(maxInstanceVersion),
+                    VK_API_VERSION_MINOR(maxInstanceVersion),
+                    VK_API_VERSION_PATCH(maxInstanceVersion));
+        if (VK_SUCCESS == res) {
+            if (maxInstanceVersion >= VK_MAKE_VERSION(1, 1, 0)) {
+                GFXSTREAM_DEBUG("global loader has vkEnumerateInstanceVersion returning >= 1.1.");
+                appInfo.apiVersion = VK_MAKE_VERSION(1, 1, 0);
+            }
+        }
+    }
+
     std::vector<const char*> getPhysicalDeviceProperties2InstanceExtNames = {
         VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
     };
@@ -804,6 +829,18 @@ std::unique_ptr<VkEmulation> VkEmulation::create(VulkanDispatch* gvk,
     std::vector<const char*> surfaceInstanceExtNames = {
         VK_KHR_SURFACE_EXTENSION_NAME,
     };
+
+    if(appInfo.apiVersion >= VK_MAKE_VERSION(1, 1, 0)) {
+#define ERASE(VEC, EXT) \
+    VEC.erase(std::remove_if(VEC.begin(), VEC.end(), [](const char* str) { \
+        return std::strcmp(str, EXT) == 0; \
+    }), VEC.end())
+        ERASE(getPhysicalDeviceProperties2InstanceExtNames, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        ERASE(externalMemoryInstanceExtNames, VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+        ERASE(externalSemaphoreInstanceExtNames, VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
+        ERASE(externalFenceInstanceExtNames, VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME);
+#undef ERASE
+    }
 
 #ifdef __APPLE__
     std::vector<const char*> moltenVkDeviceExtNames = {
@@ -835,16 +872,6 @@ std::unique_ptr<VkEmulation> VkEmulation::create(VulkanDispatch* gvk,
     const bool usePortabilityEnumeration =
         vk_util::extensionsSupported(instanceExts, portabilityEnumerationNames);
 #endif
-
-    VkApplicationInfo appInfo = {
-        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pNext = 0,
-        .pApplicationName = "AEMU",
-        .applicationVersion = 1,
-        .pEngineName = "AEMU",
-        .engineVersion = 1,
-        .apiVersion = VK_MAKE_VERSION(1, 0, 0),
-    };
 
     VkInstanceCreateInfo instCi = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -925,21 +952,6 @@ std::unique_ptr<VkEmulation> VkEmulation::create(VulkanDispatch* gvk,
     instCi.enabledExtensionCount = static_cast<uint32_t>(selectedInstanceExtensionNamesC.size());
     instCi.ppEnabledExtensionNames = selectedInstanceExtensionNamesC.data();
 
-    // Can we know instance version early?
-    uint32_t maxInstanceVersion = VK_VERSION_1_0;
-    if (gvk->vkEnumerateInstanceVersion) {
-        VkResult res = gvk->vkEnumerateInstanceVersion(&maxInstanceVersion);
-        GFXSTREAM_DEBUG("Global loader has instance version = %d.%d.%d",
-                    VK_API_VERSION_MAJOR(maxInstanceVersion),
-                    VK_API_VERSION_MINOR(maxInstanceVersion),
-                    VK_API_VERSION_PATCH(maxInstanceVersion));
-        if (VK_SUCCESS == res) {
-            if (maxInstanceVersion >= VK_MAKE_VERSION(1, 1, 0)) {
-                GFXSTREAM_DEBUG("global loader has vkEnumerateInstanceVersion returning >= 1.1.");
-                appInfo.apiVersion = VK_MAKE_VERSION(1, 1, 0);
-            }
-        }
-    }
 #ifdef CONFIG_AEMU
     // This probably won't work for any vulkan apps, and should not be chosen with the auto gpu
     // selection system, but provide a warning in case the user enforces an old vulkan driver.

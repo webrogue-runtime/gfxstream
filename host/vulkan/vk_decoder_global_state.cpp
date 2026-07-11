@@ -2839,11 +2839,12 @@ class VkDecoderGlobalState::Impl {
 
         VkExternalMemoryBufferCreateInfo externalCI = {
             VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
+#if 0 // WEBROGUE
         if (m_vkEmulation->getFeatures().VulkanAllocateHostMemory.enabled()) {
             localCreateInfo = *pCreateInfo;
             // Hint that we 'may' use host allocation for this buffer. This will only be used for
             // host visible memory.
-            externalCI.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+                        externalCI.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
 
             // Insert the new struct to the chain
             externalCI.pNext = localCreateInfo.pNext;
@@ -2851,6 +2852,7 @@ class VkDecoderGlobalState::Impl {
 
             pCreateInfo = &localCreateInfo;
         }
+#endif
 
         VkResult result = vk->vkCreateBuffer(device, pCreateInfo, nullptr, pBuffer);
 
@@ -6288,6 +6290,7 @@ class VkDecoderGlobalState::Impl {
                 }
 #endif
                 if (m_vkEmulation->getExternalMemoryMode() == ExternalMemory::Mode::HostAllocation) {
+                    abort();
                     importHostInfo.pHostPointer =
                         m_vkEmulation->getColorBufferHostPointer(importCbInfoPtr->colorBuffer);
                     vk_append_struct(&structChainIter, &importHostInfo);
@@ -6375,6 +6378,7 @@ class VkDecoderGlobalState::Impl {
 #endif
 
             if (m_vkEmulation->getExternalMemoryMode() == ExternalMemory::Mode::HostAllocation) {
+                abort();
                 importHostInfo.pHostPointer =
                     m_vkEmulation->getBufferHostPointer(importBufferInfoPtr->buffer);
                 vk_append_struct(&structChainIter, &importHostInfo);
@@ -6631,6 +6635,7 @@ class VkDecoderGlobalState::Impl {
                 vk_append_struct(&structChainIter, &*exportAllocateInfo);
             } else if (m_vkEmulation->getFeatures().VulkanAllocateHostMemory.enabled() &&
                        localAllocInfo.pNext == nullptr) {
+                abort();
                 if (!m_vkEmulation || !m_vkEmulation->supportsExternalMemoryHostProperties()) {
                     GFXSTREAM_ERROR(
                         "VK_EXT_EXTERNAL_MEMORY_HOST is not supported, cannot use "
@@ -10137,7 +10142,9 @@ class VkDecoderGlobalState::Impl {
 
         std::vector<const char*> hostAlwaysDeviceExtensions = {
             VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+#if 0 // WEBROGUE
             VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
+#endif
             VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
             VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
         };
@@ -10170,6 +10177,23 @@ class VkDecoderGlobalState::Impl {
                 VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
 #endif
             });
+
+
+        if(m_vkEmulation->vulkanInstanceVersion() >= VK_MAKE_VERSION(1, 1, 0)) {
+#define ERASE(EXT) \
+    hostAlwaysDeviceExtensions.erase(std::remove_if(hostAlwaysDeviceExtensions.begin(), hostAlwaysDeviceExtensions.end(), [](const char* str) { \
+        return std::strcmp(str, EXT) == 0; \
+    }), hostAlwaysDeviceExtensions.end())
+
+            ERASE(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
+            ERASE(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
+#ifdef _WIN32
+            ERASE(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME);
+#elif defined(__QNX__) || defined(__unix__)
+            ERASE(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+#endif
+#undef ERASE
+        }
 
         m_vkEmulation->appendExternalMemoryModeDeviceExtensions(hostAlwaysDeviceExtensions);
 
@@ -10240,6 +10264,17 @@ class VkDecoderGlobalState::Impl {
         }
 #endif
 
+        if(m_vkEmulation->vulkanInstanceVersion() >= VK_MAKE_VERSION(1, 1, 0)) {
+#define ERASE(EXT) \
+    res.erase(std::remove_if(res.begin(), res.end(), [](const char* str) { \
+        return std::strcmp(str, EXT) == 0; \
+    }), res.end())
+
+            ERASE(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+            ERASE(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
+            ERASE(VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME);
+#undef ERASE
+        }
         return res;
     }
 
