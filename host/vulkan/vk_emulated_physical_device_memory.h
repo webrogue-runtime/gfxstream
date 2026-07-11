@@ -35,10 +35,7 @@ class EmulatedPhysicalDeviceMemoryProperties {
     // break the bank on 32-bit userspaces.
     static constexpr VkDeviceSize kDefaultMaxSafeHeapSize = 2ULL * 1024ULL * 1024ULL * 1024ULL;
 
-    EmulatedPhysicalDeviceMemoryProperties(VkPhysicalDevice physicalDevice,
-                                           VulkanDispatch* vk,
-                                           bool strict_host_visible_external_pointer,
-                                           const VkPhysicalDeviceMemoryProperties& host,
+    EmulatedPhysicalDeviceMemoryProperties(const VkPhysicalDeviceMemoryProperties& host,
                                            uint32_t hostColorBufferMemoryTypeIndex,
                                            const gfxstream::host::FeatureSet& features,
                                            VkDeviceSize maxSafeHeapSize = kDefaultMaxSafeHeapSize);

@@ -1379,9 +1379,6 @@ class VkDecoderGlobalState::Impl {
 
                 physdevInfo.memoryPropertiesHelper =
                     std::make_unique<EmulatedPhysicalDeviceMemoryProperties>(
-                        physicalDevices[i],
-                        vk,
-                        mWebrogueRegisterBlobCallback == nullptr,
                         hostMemoryProperties,
                         m_vkEmulation->getRepresentativeColorBufferMemoryTypeInfo()
                             .hostMemoryTypeIndex,
@@ -6500,60 +6497,10 @@ class VkDecoderGlobalState::Impl {
             if (createBlobInfoPtr && createBlobInfoPtr->blobMem == STREAM_BLOB_MEM_GUEST &&
                 (createBlobInfoPtr->blobFlags & STREAM_BLOB_FLAG_CREATE_GUEST_HANDLE)) {
 #if 1 // WEBROGUE
-#ifdef PAGE_SIZE
-                    size_t page_size = PAGE_SIZE;
-#elif defined(_WIN32)
-                    size_t page_size = 4096;
-#else
-                    size_t page_size = getpagesize();
-#endif
-                localAllocInfo.allocationSize += static_cast<VkDeviceSize>(page_size - 1);
-                localAllocInfo.allocationSize &= ~static_cast<VkDeviceSize>(page_size - 1);
                 pWebrogueMemoryInfo = gfxstream::base::find(mWebrogueMemoryInfo, createBlobInfoPtr->blobId);
                 if (!pWebrogueMemoryInfo) abort();
-                bool canImportGuestPointer = false;
-                if(m_vkEmulation->supportsExternalMemoryHostProperties()) {
-                    VkMemoryHostPointerPropertiesEXT memoryHostPointerProperties = {
-                        .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
-                        .pNext = NULL,
-                        .memoryTypeBits = 0,
-                    };
-                    VkResult ret = vk->vkGetMemoryHostPointerPropertiesEXT(
-                        device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, pWebrogueMemoryInfo->vmData,
-                        &memoryHostPointerProperties
-                    );
-                    if(ret == VK_SUCCESS) {
-                        canImportGuestPointer = memoryHostPointerProperties.memoryTypeBits & (1 << localAllocInfo.memoryTypeIndex);
-                    }
-                }
-                if(canImportGuestPointer) {
-                    mappedPtr = pWebrogueMemoryInfo->vmData;
-                    // TODO error
-                    assert(pWebrogueMemoryInfo->size >= localAllocInfo.allocationSize);
-                    size_t mappedPtrAlignment = reinterpret_cast<size_t>(mappedPtr) % page_size;
-                    if (mappedPtrAlignment != 0) {
-                        GFXSTREAM_ERROR(
-                            "Warning: Mapped shared memory pointer is not aligned to page size, "
-                            "alignment "
-                            "is: %d",
-                            mappedPtrAlignment);
-                    }
-// TODO check if TARGET_IPHONE_SIMULATOR is enough
-#if TARGET_OS_IPHONE
-                    // TODO unmap when calling clearLocked
-                    void* mmap_ret = mmap(mappedPtr, localAllocInfo.allocationSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED | MAP_ANON, -1, 0);
-                    assert(mmap_ret == mappedPtr);
-#endif // TARGET_OS_IPHONE
-                    importHostInfo = {
-                        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
-                        .pNext = NULL,
-                        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-                        .pHostPointer = mappedPtr,
-                    };
-                    vk_append_struct(&structChainIter, &importHostInfo);
-                } else if(mWebrogueRegisterBlobCallback) {
-                    mWebrogueRegisterBlobCallback(pWebrogueMemoryInfo->vmData, localAllocInfo.allocationSize, createBlobInfoPtr->blobId);
-                }
+                if (!mWebrogueRegisterBlobCallback) abort();
+                mWebrogueRegisterBlobCallback(pWebrogueMemoryInfo->vmData, localAllocInfo.allocationSize, createBlobInfoPtr->blobId);
 #elif defined(__ANDROID__)
                 // Android host does not use dmabuf
                 (void)virtioGpuContextId; // suppress warning
