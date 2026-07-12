@@ -136,7 +136,10 @@ void PostWorker::screenshot(ColorBuffer* cb, int screenwidth, int screenheight, 
                             const std::optional<std::array<float, 16>>& colorTransform) {
     // See b/292237104.
     mFb->lock();
-    cb->readToBytesScaled(screenwidth, screenheight, skinRotation, rect, pixelsFormat, outPixels, colorTransform);
+
+    mFb->getColorBufferScreenshot(cb, screenwidth, screenheight, skinRotation, pixelsFormat,
+                                  outPixels, rect, colorTransform);
+
     mFb->unlock();
 }
 

@@ -122,6 +122,10 @@ std::optional<GLenum> GetSizedInternalFormat(GfxstreamFormat format) {
             return std::nullopt;
         case GfxstreamFormat::YV12:
             return std::nullopt;
+        case GfxstreamFormat::A1B5G5R5_UNORM:
+            return std::nullopt;
+        case GfxstreamFormat::A8_UNORM:
+            return std::nullopt;
         default:
             return std::nullopt;
     }
@@ -181,6 +185,10 @@ std::optional<GLenum> GetPixelComponents(GfxstreamFormat format) {
             return std::nullopt;
         case GfxstreamFormat::YV12:
             return std::nullopt;
+        case GfxstreamFormat::A1B5G5R5_UNORM:
+            return std::nullopt;
+        case GfxstreamFormat::A8_UNORM:
+            return std::nullopt;
         default:
             return std::nullopt;
     }
@@ -239,6 +247,10 @@ std::optional<GLenum> GetPixelDataType(GfxstreamFormat format) {
         case GfxstreamFormat::YV21:
             return std::nullopt;
         case GfxstreamFormat::YV12:
+            return std::nullopt;
+        case GfxstreamFormat::A1B5G5R5_UNORM:
+            return std::nullopt;
+        case GfxstreamFormat::A8_UNORM:
             return std::nullopt;
         default:
             return std::nullopt;
@@ -393,49 +405,9 @@ std::unique_ptr<ColorBufferGl> ColorBufferGl::create(
         cb->m_asyncReadbackType = GL_UNSIGNED_INT_8_8_8_8_REV;
     }
 
-    // Check the ExternalObjectManager for an external memory handle provided for import
-    auto extResourceHandleInfo =
-        ExternalObjectManager::get()->removeResourceExternalHandleInfo(hndl);
-    if (extResourceHandleInfo) {
-        switch (extResourceHandleInfo->streamHandleType) {
-            case STREAM_HANDLE_TYPE_PLATFORM_EGL_NATIVE_PIXMAP: {
-                void* nativePixmap = reinterpret_cast<void*>(extResourceHandleInfo->handle);
-                cb->m_eglImage =
-                    s_egl.eglCreateImageKHR(p_display, s_egl.eglGetCurrentContext(),
-                                            EGL_NATIVE_PIXMAP_KHR, nativePixmap, nullptr);
-                if (cb->m_eglImage == EGL_NO_IMAGE_KHR) {
-                    GFXSTREAM_ERROR(
-                        "ColorBufferGl::create(): EGL_NATIVE_PIXMAP handle provided as external "
-                        "resource info, but failed to import pixmap (nativePixmap=0x%x)",
-                        nativePixmap);
-                    return nullptr;
-                }
-
-                // Assume nativePixmap is compatible with ColorBufferGl's current dimensions and
-                // internal format.
-                EGLBoolean setInfoRes = s_egl.eglSetImageInfoANDROID(
-                    p_display, cb->m_eglImage, cb->m_width, cb->m_height, formatOpenglParams.internalFormat);
-                if (EGL_TRUE != setInfoRes) {
-                    GFXSTREAM_ERROR("ColorBufferGl::create(): Failed to set image info");
-                    return nullptr;
-                }
-
-                s_gles2.glBindTexture(GL_TEXTURE_2D, cb->m_tex);
-                s_gles2.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, (GLeglImageOES)cb->m_eglImage);
-                break;
-            }
-            default: {
-                const std::string formatString = ToString(format);
-                GFXSTREAM_ERROR("ColorBufferGl::create -- external memory info was provided, but %s",
-                                formatString.c_str());
-                return nullptr;
-            }
-        }
-    } else {
-        cb->m_eglImage =
-            s_egl.eglCreateImageKHR(p_display, s_egl.eglGetCurrentContext(), EGL_GL_TEXTURE_2D_KHR,
-                                    (EGLClientBuffer)SafePointerFromUInt(cb->m_tex), NULL);
-    }
+    cb->m_eglImage =
+        s_egl.eglCreateImageKHR(p_display, s_egl.eglGetCurrentContext(), EGL_GL_TEXTURE_2D_KHR,
+                                (EGLClientBuffer)SafePointerFromUInt(cb->m_tex), NULL);
 
     s_gles2.glPixelStorei(GL_UNPACK_ALIGNMENT, prevUnpackAlignment);
 
@@ -554,7 +526,7 @@ bool ColorBufferGl::isReadbackToFormatSupported(GfxstreamFormat outputFormat) {
 }
 
 bool ColorBufferGl::readPixels(int x, int y, int width, int height, GfxstreamFormat pixelFormat,
-                               void* pixels) {
+                               void* pixels, uint32_t pixelsSize) {
     RecursiveScopedContextBind context(m_helper);
     if (!context.isOk()) {
         return false;
@@ -563,21 +535,19 @@ bool ColorBufferGl::readPixels(int x, int y, int width, int height, GfxstreamFor
     GL_SCOPED_DEBUG_GROUP("ColorBufferGl::readPixels(handle:%d fbo:%d tex:%d)", mHndl, m_fbo,
                           m_tex);
 
-    auto pixelDataComponentsOpt = GetPixelComponents(pixelFormat);
-    if (!pixelDataComponentsOpt) {
+    auto formatParamsOpt = GetFormatOpenglParameters(pixelFormat);
+    if (!formatParamsOpt) {
         const std::string formatString = ToString(pixelFormat);
-        GFXSTREAM_ERROR("Unsupported format %s", formatString.c_str());
+        GFXSTREAM_ERROR("Format %s unsupported.", formatString.c_str());
         return false;
     }
-    const GLenum pixelDataComponents = *pixelDataComponentsOpt;
+    const FormatOpenglParams& formatParams = *formatParamsOpt;
 
-    auto pixelDataTypeOpt = GetPixelDataType(pixelFormat);
-    if (!pixelDataTypeOpt) {
-        const std::string formatString = ToString(pixelFormat);
-        GFXSTREAM_ERROR("Unsupported format %s", formatString.c_str());
+    uint32_t sizeNeeded = width * height * formatParams.bpp;
+    if (pixelsSize < sizeNeeded) {
+        GFXSTREAM_ERROR("Insufficiently sized buffer for glReadPixels().");
         return false;
     }
-    const GLenum pixelDataType = *pixelDataTypeOpt;
 
     waitSync();
 
@@ -592,7 +562,8 @@ bool ColorBufferGl::readPixels(int x, int y, int width, int height, GfxstreamFor
     s_gles2.glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
     if (isReadbackToFormatSupported(pixelFormat)) {
-        s_gles2.glReadPixels(x, y, width, height, pixelDataComponents, pixelDataType, pixels);
+        s_gles2.glReadPixels(x, y, width, height, formatParams.pixelDataComponents,
+                             formatParams.pixelDataType, pixels);
     } else {
         // Software readback. All GL drivers support RGBA readback. We try our best here to
         // support conversions from RGBA to some commonly requested formats.
@@ -605,7 +576,7 @@ bool ColorBufferGl::readPixels(int x, int y, int width, int height, GfxstreamFor
             GFXSTREAM_ERROR(
                 "UNIMPLEMENTED: GLES driver doesn't support readback for "
                 "(components=0x%x type=0x%x) and no software conversion implemented.",
-                pixelDataComponents, pixelDataType);
+                formatParams.pixelDataComponents, formatParams.pixelDataType);
             res = false;
         }
     }
@@ -660,9 +631,10 @@ bool ColorBufferGl::readPixelsScaled(int width, int height, int rotation, const 
         // In fact, the spec only require RGBA8888 format support. Supports for
         // other formats are optional.
         bool needConvert4To3Channel =
-                pixelDataComponents == GL_RGB && pixelDataType == GL_UNSIGNED_BYTE &&
-                (get_gfxstream_renderer() == SELECTED_RENDERER_SWIFTSHADER_INDIRECT ||
-                    get_gfxstream_renderer() == SELECTED_RENDERER_ANGLE_INDIRECT);
+            pixelDataComponents == GL_RGB && pixelDataType == GL_UNSIGNED_BYTE &&
+            (get_gfxstream_renderer() == SELECTED_RENDERER_SWIFTSHADER_INDIRECT ||
+             get_gfxstream_renderer() == SELECTED_RENDERER_LAVAPIPE ||
+             get_gfxstream_renderer() == SELECTED_RENDERER_ANGLE_INDIRECT);
         std::vector<uint8_t> tmpPixels;
         void* readPixelsDst = pixels;
         if (needConvert4To3Channel) {
@@ -859,20 +831,16 @@ bool ColorBufferGl::replaceContents(const void* newContents, size_t numBytes) {
     return subUpdate(0, 0, m_width, m_height, m_format, newContents);
 }
 
-bool ColorBufferGl::readContents(size_t* numBytes, void* pixels) {
+bool ColorBufferGl::readContents(std::vector<uint8_t>* outContents) {
     if (m_yuv_converter) {
         // common code path for vk & gles
-        *numBytes = m_yuv_converter->getDataSize();
-        if (!pixels) {
-            return true;
-        }
-        return readPixelsYUVCached(0, 0, 0, 0, pixels, *numBytes);
+        size_t needed = m_yuv_converter->getDataSize();
+        outContents->resize(needed);
+        return readPixelsYUVCached(0, 0, 0, 0, outContents->data(), outContents->size());
     } else {
-        *numBytes = m_numBytes;
-        if (!pixels) {
-            return true;
-        }
-        return readPixels(0, 0, m_width, m_height, m_format, pixels);
+        outContents->resize(m_numBytes);
+        return readPixels(0, 0, m_width, m_height, m_format, outContents->data(),
+                          outContents->size());
     }
 }
 
@@ -1113,18 +1081,20 @@ bool ColorBufferGl::post(GLuint tex, float rotation, float dx, float dy,
     return m_textureDraw->draw(tex, rotation, dx, dy, colorTransform);
 }
 
-bool ColorBufferGl::postViewportScaledWithOverlay(float rotation, float dx, float dy,
-                                                  const std::optional<std::array<float, 16>>& colorTransform) {
+bool ColorBufferGl::postViewportScaledWithOverlay(
+    float rotation, float dx, float dy, float scaleX, float scaleY,
+    const std::optional<std::array<float, 16>>& colorTransform) {
     // NOTE: Do not call m_helper->setupContext() here!
     waitSync();
-    return m_textureDraw->drawWithOverlay(getViewportScaledTexture(), rotation, dx, dy,
-                                          colorTransform);
+
+    return m_textureDraw->drawWithOverlay(getViewportScaledTexture(), rotation, dx, dy, scaleX,
+                                          scaleY, colorTransform);
 }
 
-void ColorBufferGl::readback(unsigned char* img, bool readbackBgra) {
+bool ColorBufferGl::readback(unsigned char* img, bool readbackBgra) {
     RecursiveScopedContextBind context(m_helper);
     if (!context.isOk()) {
-        return;
+        return false;
     }
 
     waitSync();
@@ -1138,12 +1108,13 @@ void ColorBufferGl::readback(unsigned char* img, bool readbackBgra) {
         s_gles2.glReadPixels(0, 0, m_width, m_height, format, GL_UNSIGNED_BYTE, img);
         unbindFbo();
     }
+    return true;
 }
 
-void ColorBufferGl::readbackAsync(GLuint buffer, bool readbackBgra) {
+bool ColorBufferGl::readbackAsync(GLuint buffer, bool readbackBgra) {
     RecursiveScopedContextBind context(m_helper);
     if (!context.isOk()) {
-        return;
+        return false;
     }
 
     waitSync();
@@ -1157,6 +1128,7 @@ void ColorBufferGl::readbackAsync(GLuint buffer, bool readbackBgra) {
         s_gles2.glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         unbindFbo();
     }
+    return true;
 }
 
 HandleType ColorBufferGl::getHndl() const { return mHndl; }
@@ -1230,8 +1202,6 @@ void ColorBufferGl::restore() {
     }
 }
 
-GLuint ColorBufferGl::getTexture() { return m_tex; }
-
 void ColorBufferGl::postLayer(const ComposeLayer& l, int frameWidth, int frameHeight,
         const std::optional<std::array<float, 16>>& colorTransform) {
     waitSync();
@@ -1285,11 +1255,7 @@ bool ColorBufferGl::importMemory(ManagedDescriptor externalDescriptor, uint64_t 
     GLuint glTiling = linearTiling ? GL_LINEAR_TILING_EXT : GL_OPTIMAL_TILING_EXT;
 
     std::vector<uint8_t> prevContents;
-
-    size_t bytes;
-    readContents(&bytes, nullptr);
-    prevContents.resize(bytes, 0);
-    readContents(&bytes, prevContents.data());
+    readContents(&prevContents);
 
     s_gles2.glDeleteTextures(1, &m_tex);
     s_gles2.glDeleteFramebuffers(1, &m_fbo);
@@ -1348,15 +1314,19 @@ bool ColorBufferGl::importEglNativePixmap(void* pixmap, bool preserveContent) {
     }
 
     // Assume pixmap is compatible with ColorBufferGl's current dimensions and internal format.
-    auto internalFormatOpt = GetSizedInternalFormat(m_format);
-    if (!internalFormatOpt) {
+    // Note: YUV resource formats will automatically be converted by this helper function to their
+    // corresponding host format (i.e. RGBA8888) for the internal format. This provides identical
+    // behavior to what is set on eglSetImageInfoAndroid() during initial ColorBufferGl creation.
+    auto cbFormatOpenglParamsOpt = GetFormatOpenglParameters(m_format);
+    if (!cbFormatOpenglParamsOpt) {
         const std::string formatString = ToString(m_format);
         GFXSTREAM_ERROR("Unsupported format:%s.", formatString.c_str());
         return false;
     }
-    const GLint internalFormat = *internalFormatOpt;
+    FormatOpenglParams& cbFormatOpenglParams = *cbFormatOpenglParamsOpt;
 
-    EGLBoolean setInfoRes = s_egl.eglSetImageInfoANDROID(m_display, image, m_width, m_height, internalFormat);
+    EGLBoolean setInfoRes = s_egl.eglSetImageInfoANDROID(m_display, image, m_width, m_height,
+                                                         cbFormatOpenglParams.internalFormat);
     if (EGL_TRUE != setInfoRes) {
         fprintf(stderr, "%s: error: failed to set image info\n", __func__);
         s_egl.eglDestroyImageKHR(m_display, image);
@@ -1367,10 +1337,7 @@ bool ColorBufferGl::importEglNativePixmap(void* pixmap, bool preserveContent) {
 
     std::vector<uint8_t> contents;
     if (preserveContent) {
-        size_t bytes;
-        readContents(&bytes, nullptr);
-        contents.resize(bytes);
-        readContents(&bytes, contents.data());
+        readContents(&contents);
     }
 
     s_gles2.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, (GLeglImageOES)NULL);

@@ -30,16 +30,15 @@
 #if GFXSTREAM_ENABLE_HOST_GLES
 #include "render_control.h"
 #endif
-#include "render_thread_info.h"
-#include "vulkan/vk_decoder_context.h"
-#include "gfxstream/host/ChecksumCalculatorThreadInfo.h"
 #include "gfxstream/common/logging.h"
 #include "gfxstream/host/ChecksumCalculatorThreadInfo.h"
 #include "gfxstream/host/stream_utils.h"
 #include "gfxstream/synchronization/Lock.h"
 #include "gfxstream/synchronization/MessageChannel.h"
 #include "gfxstream/system/System.h"
+#include "render_thread_info.h"
 #include "vulkan/vk_common_operations.h"
+#include "vulkan/vk_decoder_context.h"
 
 namespace gfxstream {
 namespace host {
@@ -120,6 +119,7 @@ void RenderThread::pausePreSnapshot() {
     assert(mState == SnapshotState::Empty);
     mStream.emplace();
     mState = SnapshotState::StartSaving;
+    mDecodersShouldStop.store(true, std::memory_order_relaxed);
     if (mRingStream) {
         mRingStream->pausePreSnapshot();
         // mSnapshotSignal.broadcastAndUnlock(&lock);
@@ -143,6 +143,7 @@ void RenderThread::resume() {
     mNeedReloadProcessResources = true;
     mStream.reset();
     mState = SnapshotState::Empty;
+    mDecodersShouldStop.store(false, std::memory_order_relaxed);
     if (mChannel) mChannel->resume();
     if (mRingStream) mRingStream->resume();
     mSnapshotSignal.broadcastAndUnlock(&lock);
@@ -234,6 +235,7 @@ void RenderThread::sendExitSignal() {
     if (!mFinished.load(std::memory_order_relaxed)) {
         GFXSTREAM_FATAL("RenderThread exit signal sent before finished");
     }
+    mDecodersShouldStop.store(true, std::memory_order_relaxed);
     mCanExit.store(true, std::memory_order_relaxed);
     mExitSignal.broadcastAndUnlock(&lock);
 }
@@ -275,8 +277,7 @@ intptr_t RenderThread::main() {
     }
 
     std::unique_ptr<RenderThreadInfo> tInfo = std::make_unique<RenderThreadInfo>();
-    ChecksumCalculatorThreadInfo tChecksumInfo;
-    ChecksumCalculator& checksumCalc = tChecksumInfo.get();
+    ChecksumCalculator& checksumCalc = ChecksumCalculatorThreadInfo::get();
     bool needRestoreFromSnapshot = false;
 
     //
@@ -405,7 +406,6 @@ intptr_t RenderThread::main() {
                 GFXSTREAM_INFO("Used Bandwidth %5.3f MB/s, time in progress %f ms total %f ms\n",
                                ((float)stats_totalBytes / dts) / (1024.0f * 1024.0f),
                                stats_progressTimeUs / 1000.0f, (float)dt);
-                readBuf.printStats();
                 stats_t0 = gfxstream::base::getHighResTimeUs() / 1000;
                 stats_progressTimeUs = 0;
                 stats_totalBytes = 0;
@@ -446,7 +446,7 @@ intptr_t RenderThread::main() {
                 VkDecoderContext context = {
                     .processName = contextName,
                     .gfxApiLogger = &gfxLogger,
-                    .shouldExit = &(tInfo->m_shouldExit),
+                    .shouldExit = &mDecodersShouldStop,
                 };
                 last = tInfo->m_vkInfo->m_vkDec.decode(readBuf.buf(), readBuf.validData(), ioStream,
                                                       processResources, context);

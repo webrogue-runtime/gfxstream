@@ -19,10 +19,21 @@
 
 #include "gfxstream/common/logging.h"
 
+#ifndef _WIN32
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <assert.h>
+#include <unistd.h>
+#endif
+
 namespace gfxstream {
 namespace host {
 namespace vk {
 namespace {
+
+#ifdef max
+#undef max
+#endif
 
 static constexpr const uint32_t kInvalidMemoryTypeIndex = std::numeric_limits<uint32_t>::max();
 
@@ -30,7 +41,9 @@ static constexpr const uint32_t kInvalidMemoryTypeIndex = std::numeric_limits<ui
 
 EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(
     const VkPhysicalDeviceMemoryProperties& hostMemoryProperties,
-    const uint32_t hostColorBufferMemoryTypeIndex, const gfxstream::host::FeatureSet& features) {
+    const uint32_t hostColorBufferMemoryTypeIndex, const gfxstream::host::FeatureSet& features,
+    const VkDeviceSize maxSafeHeapSize)
+    : mMaxSafeHeapSize(maxSafeHeapSize) {
     // Start with the original host memory properties:
     mHostMemoryProperties = hostMemoryProperties;
     mGuestMemoryProperties = hostMemoryProperties;
@@ -44,16 +57,22 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(
 
     // Hide any bogus heap sizes from bad drivers with a reasonable default that will not
     // break the bank on 32-bit userspaces.
-    static constexpr VkDeviceSize kMaxSafeHeapSize = 2ULL * 1024ULL * 1024ULL * 1024ULL;
     for (uint32_t i = 0; i < mHostMemoryProperties.memoryHeapCount; i++) {
-        if (mGuestMemoryProperties.memoryHeaps[i].size > kMaxSafeHeapSize) {
-            mGuestMemoryProperties.memoryHeaps[i].size = kMaxSafeHeapSize;
+        if (mGuestMemoryProperties.memoryHeaps[i].size > mMaxSafeHeapSize) {
+            mGuestMemoryProperties.memoryHeaps[i].size = mMaxSafeHeapSize;
         }
+    }
+
+    // Strip VK_AMD_device_coherent_memory flags that gfxstream does not translate.
+    for (uint32_t i = 0; i < mGuestMemoryProperties.memoryTypeCount; i++) {
+        mGuestMemoryProperties.memoryTypes[i].propertyFlags &=
+            ~(VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD |
+              VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD);
     }
 
     // If enabled, hide non device memory types from the guest.
     // (useful to work around a bug where KVM can't map TTM memory).
-    if (features.VulkanAllocateDeviceMemoryOnly.enabled) {
+    if (features.VulkanAllocateDeviceMemoryOnly.enabled()) {
         for (uint32_t i = 0; i < mGuestMemoryProperties.memoryTypeCount; i++) {
             auto guestMemoryProperties = mGuestMemoryProperties.memoryTypes[i].propertyFlags;
             if (!(guestMemoryProperties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
@@ -63,7 +82,7 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(
     }
 
     // Coherent memory in the guest requires one of these features:
-    if (!features.GlDirectMem.enabled && !features.VirtioGpuNext.enabled) {
+    if (!features.GlDirectMem.enabled() && !features.VirtioGpuNext.enabled()) {
         for (uint32_t i = 0; i < mGuestMemoryProperties.memoryTypeCount; i++) {
             mGuestMemoryProperties.memoryTypes[i].propertyFlags =
                 mGuestMemoryProperties.memoryTypes[i].propertyFlags &
@@ -72,7 +91,7 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(
     }
 
     // Let cached memory pretend as coherent on the guest side.
-    if (features.VulkanDisableCoherentMemoryAndEmulate.enabled) {
+    if (features.VulkanDisableCoherentMemoryAndEmulate.enabled()) {
         for (uint32_t i = 0; i < mGuestMemoryProperties.memoryTypeCount; i++) {
             if (mGuestMemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) {
                 mGuestMemoryProperties.memoryTypes[i].propertyFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -82,7 +101,7 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(
         }
     }
 
-    if (features.VulkanEnsureCachedCoherentMemoryAvailable.enabled) {
+    if (features.VulkanEnsureCachedCoherentMemoryAvailable.enabled()) {
         /* Some app layers (i.e. Angle) require *some* coherent-cached memory to be
          *  available. To ensure compatiblity these guest layers, when coherent-cached
          *  memory type is unavailable, append the cached bit to the first coherent
@@ -121,7 +140,7 @@ EmulatedPhysicalDeviceMemoryProperties::EmulatedPhysicalDeviceMemoryProperties(
     // so that the host can control its memory properties. This ensures that the guest
     // only sees `VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT` and will not try to map the
     // memory.
-    if (features.VulkanUseDedicatedAhbMemoryType.enabled) {
+    if (features.VulkanUseDedicatedAhbMemoryType.enabled()) {
         if (mGuestMemoryProperties.memoryTypeCount == VK_MAX_MEMORY_TYPES) {
             GFXSTREAM_FATAL("Unable to create emulated AHB memory type because VK_MAX_MEMORY_TYPES "
                             "already in use.");
@@ -189,6 +208,22 @@ void EmulatedPhysicalDeviceMemoryProperties::transformToGuestMemoryRequirements(
     }
 
     memoryRequirements->memoryTypeBits = guestMemoryTypeBits;
+}
+
+void EmulatedPhysicalDeviceMemoryProperties::clampMemoryBudgetToGuestHeapSizes(
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT* budgetProps) const {
+    if (budgetProps == nullptr) {
+        return;
+    }
+    for (uint32_t i = 0; i < mGuestMemoryProperties.memoryHeapCount; i++) {
+        const VkDeviceSize heapSize = mGuestMemoryProperties.memoryHeaps[i].size;
+        if (budgetProps->heapBudget[i] > heapSize) {
+            budgetProps->heapBudget[i] = heapSize;
+        }
+        if (budgetProps->heapUsage[i] > heapSize) {
+            budgetProps->heapUsage[i] = heapSize;
+        }
+    }
 }
 
 }  // namespace vk

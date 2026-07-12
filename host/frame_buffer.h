@@ -15,7 +15,7 @@
  */
 
 #pragma once
-
+#if 0 // WEBROGUE
 #include <stdint.h>
 
 #include <memory>
@@ -78,8 +78,7 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
     // own sub-windows. If false, this means the caller will use
     // setPostCallback() instead to retrieve the content.
     // Returns true on success, false otherwise.
-    static bool initialize(int width, int height, const FeatureSet& features,
-                           bool useSubWindow);
+    static bool initialize(int width, int height, const FeatureSet& features, bool useSubWindow);
 
     // Finalize the instance.
     static void finalize();
@@ -143,19 +142,17 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
     // internal count.
     HandleType createColorBuffer(int p_width, int p_height, GfxstreamFormat format);
 
-    HandleType createColorBufferDeprecated(int width, int height,
-                                           GLenum internalFormat,
+    HandleType createColorBufferDeprecated(int width, int height, GLenum internalFormat,
                                            FrameworkFormat frameworkFormat);
 
     // Variant of createColorBuffer except with a particular
     // handle already assigned. This is for use with
     // virtio-gpu's RESOURCE_CREATE ioctl.
-    void createColorBufferWithResourceHandle(int p_width, int p_height,
-                                             GfxstreamFormat format,
+    // Returns true on success, false otherwise.
+    bool createColorBufferWithResourceHandle(int p_width, int p_height, GfxstreamFormat format,
                                              HandleType handle);
 
-    void createColorBufferWithResourceHandleDeprecated(int width, int height,
-                                                       GLenum internalFormat,
+    bool createColorBufferWithResourceHandleDeprecated(int width, int height, GLenum internalFormat,
                                                        FrameworkFormat frameworkFormat,
                                                        HandleType handle);
 
@@ -170,7 +167,8 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
     // Variant of createBuffer except with a particular handle already
     // assigned and using device local memory. This is for use with
     // virtio-gpu's RESOURCE_CREATE ioctl for BLOB resources.
-    void createBufferWithResourceHandle(uint64_t size, HandleType handle);
+    // Returns true on success, false otherwise.
+    bool createBufferWithResourceHandle(uint64_t size, HandleType handle);
 
     // Increment the reference count associated with a given ColorBuffer
     // instance. |p_colorbuffer| is its handle value as returned by
@@ -214,11 +212,10 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
     // with the pixel data.
     // |outPixelsSize| is the size of buffer
     void readColorBuffer(HandleType p_colorbuffer, int x, int y, int width, int height,
-                         GfxstreamFormat pixelsFormat, void* pixels,
-                         uint64_t outPixelsSize = std::numeric_limits<uint64_t>::max());
-    void readColorBufferDeprecated(HandleType p_colorbuffer, int x, int y, int width,
-                                   int height, GLenum format, GLenum type,
-                                   void* pixels, uint64_t outPixelsSize = std::numeric_limits<uint64_t>::max());
+                         GfxstreamFormat pixelsFormat, void* pixels, uint64_t outPixelsSize);
+    void readColorBufferDeprecated(HandleType p_colorbuffer, int x, int y, int width, int height,
+                                   GLenum format, GLenum type, void* pixels,
+                                   uint64_t outPixelsSize);
 
     // Read the content of a given YUV420_888 ColorBuffer into client memory.
     // |p_colorbuffer| is the ColorBuffer's handle value. Similar
@@ -249,14 +246,12 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
     // |type| is the type of pixel data, e.g. GL_UNSIGNED_BYTE.
     // |pixels| is the address of a buffer containing the new pixel data.
     // Returns true on success, false otherwise.
-    bool updateColorBuffer(HandleType p_colorbuffer, int x, int y, int width,
-                           int height, GfxstreamFormat pixelFormat, void* pixels);
-    bool updateColorBufferDeprecated(HandleType p_colorbuffer, int x, int y, int width,
-                                     int height, GLenum format, GLenum type,
-                                     void* pixels);
-    bool updateColorBufferDeprecated(HandleType p_colorbuffer, int x, int y, int width,
-                                     int height, GLenum format, FrameworkFormat frameworkFormat,
-                                     void* pixels);
+    bool updateColorBuffer(HandleType p_colorbuffer, int x, int y, int width, int height,
+                           GfxstreamFormat pixelFormat, void* pixels);
+    bool updateColorBufferDeprecated(HandleType p_colorbuffer, int x, int y, int width, int height,
+                                     GLenum format, GLenum type, void* pixels);
+    bool updateColorBufferDeprecated(HandleType p_colorbuffer, int x, int y, int width, int height,
+                                     GLenum format, FrameworkFormat frameworkFormat, void* pixels);
 
     // Display the content of a given ColorBuffer into the framebuffer's
     // sub-window. |p_colorbuffer| is a handle value.
@@ -335,6 +330,7 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
 
     void setScreenMask(int width, int height, const uint8_t* rgbaData);
     void setScreenBackground(int width, int height, const uint8_t* rgbaData);
+    void setDisplayLayout(int screenWidth, int screenHeight, const Rect& displayRect);
 
     void registerVulkanInstance(uint64_t id, const char* appName) const;
     void unregisterVulkanInstance(uint64_t id) const;
@@ -363,6 +359,13 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
     int getScreenshot(unsigned int nChannels, unsigned int* width, unsigned int* height,
                       uint8_t* pixels, size_t* cPixels, int displayId, int desiredWidth,
                       int desiredHeight, int desiredRotation, Rect rect = {{0, 0}, {0, 0}});
+
+    // Saves a screenshot from a color buffer, applies post processing like color transform,
+    // display layout and background blending.
+    int getColorBufferScreenshot(ColorBuffer* cb, int screenwidth, int screenheight,
+                                 int skinRotation, GfxstreamFormat pixelsFormat, void* outPixels,
+                                 const Rect& rect,
+                                 const std::optional<std::array<float, 16>>& colorTransform);
 
     void onLastColorBufferRef(uint32_t handle);
     ColorBufferPtr findColorBuffer(HandleType p_colorbuffer);
@@ -578,16 +581,6 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
                                           int height, uint32_t format, uint32_t type,
                                           uint32_t texturesFormat, uint32_t* textures);
 
-    // Reads back the raw color buffer to |pixels|
-    // if |pixels| is not null.
-    // Always returns in |numBytes| how many bytes were
-    // planned to be transmitted.
-    // |numBytes| is not an input parameter;
-    // fewer or more bytes cannot be specified.
-    // If the framework format is YUV, it will read
-    // back as raw YUV data.
-    bool readColorBufferContents(HandleType p_colorbuffer, size_t* numBytes, void* pixels);
-
     void asyncWaitForGpuWithCb(uint64_t eglsync, FenceCompletionCallback cb);
 
     const void* getEglDispatch();
@@ -598,15 +591,17 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
     // On return, |*vendor|, |*renderer| and |*version| will point to strings
     // that are owned by the instance (and must not be freed by the caller).
     void getDeviceInfo(const char** vendor, const char** renderer, const char** version) const;
-    void getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
+    bool getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
                                       uint32_t* driver_version, uint32_t* api_version,
                                       uint32_t* vendor_id, uint32_t* device_id,
                                       uint32_t* device_type, uint64_t* device_memory);
 
     const FeatureSet& getFeatures() const;
 
-    RepresentativeColorBufferMemoryTypeInfo getRepresentativeColorBufferMemoryTypeInfo()
-        const;
+    RepresentativeColorBufferMemoryTypeInfo getRepresentativeColorBufferMemoryTypeInfo() const;
+
+    void applyScreenshotBackground(const int width, const int height, const int numChannels,
+                                   uint8_t* pixelDataInOut);
 
    private:
     FrameBuffer() = default;
@@ -617,3 +612,4 @@ class FrameBuffer : public gfxstream::base::EventNotificationSupport<FrameBuffer
 
 }  // namespace host
 }  // namespace gfxstream
+#endif

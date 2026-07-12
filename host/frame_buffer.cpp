@@ -156,7 +156,7 @@ std::optional<GfxstreamFormat> GetGfxstreamFormat(
             return GfxstreamFormat::YV12;
         }
         case FRAMEWORK_FORMAT_YUV_420_888: {
-            if (features.Yuv420888ToNv21.enabled) {
+            if (features.Yuv420888ToNv21.enabled()) {
                 return GfxstreamFormat::NV21;
             } else {
                 return GfxstreamFormat::YV21;
@@ -292,7 +292,7 @@ std::optional<GfxstreamFormat> GetGfxstreamFormat(
         case FRAMEWORK_FORMAT_P010:
             return GfxstreamFormat::P010;
         case FRAMEWORK_FORMAT_YUV_420_888: {
-            if (features.Yuv420888ToNv21.enabled) {
+            if (features.Yuv420888ToNv21.enabled()) {
                 return GfxstreamFormat::NV21;
             } else {
                 return GfxstreamFormat::YV21;
@@ -387,16 +387,16 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
     HandleType createColorBufferDeprecated(int width, int height,
                                            GLenum internalFormat,
                                            FrameworkFormat frameworkFormat);
-    void createColorBufferWithResourceHandle(int p_width, int p_height,
+    bool createColorBufferWithResourceHandle(int p_width, int p_height,
                                              GfxstreamFormat format, HandleType handle);
-    void createColorBufferWithResourceHandleDeprecated(int width, int height,
+    bool createColorBufferWithResourceHandleDeprecated(int width, int height,
                                                        GLenum internalFormat,
                                                        FrameworkFormat frameworkFormat,
                                                        HandleType handle);
 
     HandleType createBuffer(uint64_t size, uint32_t memoryProperty);
 
-    void createBufferWithResourceHandle(uint64_t size, HandleType handle);
+    bool createBufferWithResourceHandle(uint64_t size, HandleType handle);
 
     int openColorBuffer(HandleType p_colorbuffer);
 
@@ -415,9 +415,8 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
     void readColorBuffer(HandleType p_colorbuffer, int x, int y, int width, int height,
                          GfxstreamFormat pixelsFormat, void* pixels,
                          uint64_t outPixelsSize = std::numeric_limits<uint64_t>::max());
-    void readColorBufferDeprecated(HandleType p_colorbuffer, int x, int y, int width,
-                                   int height, GLenum format, GLenum type,
-                                   void* pixels,
+    void readColorBufferDeprecated(HandleType p_colorbuffer, int x, int y, int width, int height,
+                                   GLenum format, GLenum type, void* pixels,
                                    uint64_t outPixelsSize = std::numeric_limits<uint64_t>::max());
 
     void readColorBufferYUV(HandleType p_colorbuffer, int x, int y, int width, int height,
@@ -427,18 +426,17 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
 
     bool updateColorBuffer(HandleType colorbuffer, int x, int y, int width, int height,
                            GfxstreamFormat pixelsFormat, void* pixels);
-    bool updateColorBufferDeprecated(HandleType colorbuffer, int x, int y, int width,
-                                     int height, GLenum format, GLenum type, void* pixels);
-    bool updateColorBufferDeprecated(HandleType colorbuffer, int x, int y, int width,
-                                     int height, GLenum format, FrameworkFormat frameworkFormat,
-                                     void* pixels);
+    bool updateColorBufferDeprecated(HandleType colorbuffer, int x, int y, int width, int height,
+                                     GLenum format, GLenum type, void* pixels);
+    bool updateColorBufferDeprecated(HandleType colorbuffer, int x, int y, int width, int height,
+                                     GLenum format, FrameworkFormat frameworkFormat, void* pixels);
 
     bool post(HandleType p_colorbuffer, bool needLockAndBind = true);
 
     void postWithCallback(HandleType p_colorbuffer, Post::CompletionCallback callback,
                           bool needLockAndBind = true);
-    bool hasGuestPostedAFrame() { return m_guestPostedAFrame; }
-    void resetGuestPostedAFrame() { m_guestPostedAFrame = false; }
+    bool hasGuestPostedAFrame() { return m_guestPostedAFrameTime.has_value(); }
+    void resetGuestPostedAFrame() { m_guestPostedAFrameTime = std::nullopt; }
 
     void doPostCallback(void* pixels, uint32_t displayId);
 
@@ -509,6 +507,8 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
     void setScreenMask(int width, int height, const uint8_t* rgbaData);
     void setScreenBackground(int width, int height, const uint8_t* rgbaData);
 
+    void setDisplayLayout(int screenWidth, int screenHeight, const Rect& displayRect);
+
     void registerVulkanInstance(uint64_t id, const char* appName) const;
     void unregisterVulkanInstance(uint64_t id) const;
 
@@ -536,6 +536,13 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
     int getScreenshot(unsigned int nChannels, unsigned int* width, unsigned int* height,
                       uint8_t* pixels, size_t* cPixels, int displayId, int desiredWidth,
                       int desiredHeight, int desiredRotation, Rect rect = {{0, 0}, {0, 0}});
+
+    // Saves a screenshot from a color buffer, applies post processing like color transform,
+    // display layout and background blending.
+    int getColorBufferScreenshot(ColorBuffer* cb, int targetWidth, int targetHeight,
+                                 int skinRotation, GfxstreamFormat pixelsFormat, void* outPixels,
+                                 const Rect& rect,
+                                 const std::optional<std::array<float, 16>>& colorTransform);
 
     void onLastColorBufferRef(uint32_t handle);
     ColorBufferPtr findColorBuffer(HandleType p_colorbuffer);
@@ -750,16 +757,6 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
                                           int height, uint32_t format, uint32_t type,
                                           uint32_t texturesFormat, uint32_t* textures);
 
-    // Reads back the raw color buffer to |pixels|
-    // if |pixels| is not null.
-    // Always returns in |numBytes| how many bytes were
-    // planned to be transmitted.
-    // |numBytes| is not an input parameter;
-    // fewer or more bytes cannot be specified.
-    // If the framework format is YUV, it will read
-    // back as raw YUV data.
-    bool readColorBufferContents(HandleType p_colorbuffer, size_t* numBytes, void* pixels);
-
     void asyncWaitForGpuWithCb(uint64_t eglsync, FenceCompletionCallback cb);
 
     const gl::EGLDispatch* getEglDispatch();
@@ -776,19 +773,25 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
         *version = m_graphicsApiVersion.c_str();
     }
 
-    void getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
+    bool getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
                                       uint32_t* driver_version, uint32_t* api_version,
                                       uint32_t* vendor_id, uint32_t* device_id,
                                       uint32_t* device_type, uint64_t* device_memory) {
-        assert(m_emulationVk);
-        m_emulationVk->getVulkanEmulationDeviceInfo(device_name, driver_info, driver_version,
-                                                    api_version, vendor_id, device_id, device_type,
-                                                    device_memory);
+        if (!m_emulationVk) {
+            GFXSTREAM_WARNING("Requested Vulkan device information without emulation support");
+            return false;
+        }
+        return m_emulationVk->getVulkanEmulationDeviceInfo(device_name, driver_info, driver_version,
+                                                           api_version, vendor_id, device_id,
+                                                           device_type, device_memory);
     }
 
     const gfxstream::host::FeatureSet& getFeatures() const { return m_features; }
 
     RepresentativeColorBufferMemoryTypeInfo getRepresentativeColorBufferMemoryTypeInfo() const;
+
+    void applyScreenshotBackground(const int width, const int height, const int numChannels,
+                                   uint8_t* pixelDataInOut);
 
    private:
     Impl(FrameBuffer* framebuffer, int p_width, int p_height, const FeatureSet& features,
@@ -819,14 +822,13 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
                          bool needLockAndBind = true, bool repaint = false);
     bool postImplSync(HandleType p_colorbuffer, bool needLockAndBind = true, bool repaint = false);
     void setGuestPostedAFrame() {
-        m_guestPostedAFrame = true;
+        m_guestPostedAFrameTime = std::chrono::steady_clock::now();
         m_framebuffer->fireEvent({FrameBufferChange::FrameReady, mFrameNumber++});
     }
-    HandleType createColorBufferWithResourceHandleLocked(int p_width, int p_height,
-                                                         GfxstreamFormat format,
-                                                         HandleType handle);
-    HandleType createBufferWithResourceHandleLocked(int p_size, HandleType handle,
-                                                    uint32_t memoryProperty);
+    bool createColorBufferWithResourceHandleLocked(int p_width, int p_height,
+                                                   GfxstreamFormat format, HandleType handle);
+    bool createBufferWithResourceHandleLocked(uint64_t p_size, HandleType handle,
+                                              uint32_t memoryProperty);
 
     void recomputeLayout();
     void setDisplayPoseInSkinUI(int totalHeight);
@@ -851,7 +853,6 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
     bool m_useSubWindow = false;
 
     bool m_fpsStats = false;
-    bool m_perfStats = false;
     int m_statsNumFrames = 0;
     long long m_statsStartTime = 0;
 
@@ -904,7 +905,7 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
         uint32_t height;
     };
     gfxstream::base::WorkerProcessingResult sendReadbackWorkerCmd(const Readback& readback);
-    bool m_guestPostedAFrame = false;
+    std::optional<std::chrono::steady_clock::time_point> m_guestPostedAFrameTime;
 
     struct onPost {
         Renderer::OnPostCallback cb;
@@ -1013,6 +1014,67 @@ class FrameBuffer::Impl : public gfxstream::base::EventNotificationSupport<Frame
     ProcOwnedColorBuffers m_procOwnedColorBuffers;
     ProcOwnedCleanupCallbacks m_procOwnedCleanupCallbacks;
 
+    // ScreenBackground, copy of the CPU data
+    // TODO: keep and use the GPU blended display image for screenshots and remove this
+    struct {
+        struct RgbaColor {
+            uint8_t r, g, b, a;
+        };
+        static_assert(sizeof(RgbaColor) == 4);
+        int m_width = 0;
+        int m_height = 0;
+        std::vector<RgbaColor> m_rgbaData;
+
+        void reset() {
+            m_width = 0;
+            m_height = 0;
+            m_rgbaData.clear();
+        }
+
+        RgbaColor getPixelSafe(int x, int y) const {
+            x = std::max(0, std::min(m_width - 1, x));
+            y = std::max(0, std::min(m_height - 1, y));
+            const uint32_t pixelIndex = (y * m_width + x);
+            return m_rgbaData[pixelIndex];
+        }
+
+        RgbaColor bilinearSample(const float u, const float v) const {
+            const float x = u * m_width;
+            const float y = v * m_height;
+            int x0 = static_cast<int>(std::floor(x));
+            int y0 = static_cast<int>(std::floor(y));
+            int x1 = x0 + 1;
+            int y1 = y0 + 1;
+
+            float tx = x - x0;
+            float ty = y - y0;
+
+            RgbaColor p00 = getPixelSafe(x0, y0);
+            RgbaColor p10 = getPixelSafe(x1, y0);
+            RgbaColor p01 = getPixelSafe(x0, y1);
+            RgbaColor p11 = getPixelSafe(x1, y1);
+
+            auto lerpComponent = [](uint8_t a, uint8_t b, float t) {
+                return static_cast<uint8_t>(a + t * (b - a));
+            };
+
+            uint8_t rTop = lerpComponent(p00.r, p10.r, tx);
+            uint8_t gTop = lerpComponent(p00.g, p10.g, tx);
+            uint8_t bTop = lerpComponent(p00.b, p10.b, tx);
+
+            uint8_t rBottom = lerpComponent(p01.r, p11.r, tx);
+            uint8_t gBottom = lerpComponent(p01.g, p11.g, tx);
+            uint8_t bBottom = lerpComponent(p01.b, p11.b, tx);
+
+            RgbaColor result;
+            result.r = lerpComponent(rTop, rBottom, ty);
+            result.g = lerpComponent(gTop, gBottom, ty);
+            result.b = lerpComponent(bTop, bBottom, ty);
+
+            return result;
+        }
+    } mScreenBackgroundImage;
+
 #if GFXSTREAM_ENABLE_HOST_GLES
     gl::EmulatedEglContextMap m_contexts;
     gl::EmulatedEglImageMap m_images;
@@ -1091,7 +1153,7 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
                                                              uint32_t width, uint32_t height,
                                                              const FeatureSet& features,
                                                              bool useSubWindow) {
-    GFXSTREAM_DEBUG("FrameBuffer::Impl::initialize");
+    GFXSTREAM_DEBUG("Creating Framebuffer: %dx%d, useSubWindow=%d", width, height, useSubWindow);
 
     gfxstream::host::InitializeTracing();
 
@@ -1103,17 +1165,34 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
 
     GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_DEFAULT_CATEGORY, "FrameBuffer::Impl::Init()");
 
-    std::unique_ptr<gfxstream::host::RenderDocWithMultipleVkInstances> renderDocMultipleVkInstances = nullptr;
-    if (!gfxstream::base::getEnvironmentVariable("ANDROID_EMU_RENDERDOC").empty()) {
-        SharedLibrary* renderdocLib = nullptr;
+    const char* ANDROID_EMU_RENDERDOC_ENVVAR = "ANDROID_EMU_RENDERDOC";
+    const char* ANDROID_EMU_RENDERDOC_CAPTURE_PATH_TEMPLATE_ENVVAR =
+        "ANDROID_EMU_RENDERDOC_CAPTURE_PATH_TEMPLATE";
+    const char* ANDROID_EMU_RENDERDOC_LIBRARY_PATH = "ANDROID_EMU_RENDERDOC_LIBRARY_PATH";
+    std::unique_ptr<gfxstream::host::RenderDocWithMultipleVkInstances>
+        renderDocMultipleVkInstances = nullptr;
+
+    if (!gfxstream::base::getEnvironmentVariable(ANDROID_EMU_RENDERDOC_ENVVAR).empty()) {
+        std::string renderDocLibraryPath =
+            gfxstream::base::getEnvironmentVariable(ANDROID_EMU_RENDERDOC_LIBRARY_PATH);
+        const bool renderDocLibraryPathIsGiven = !renderDocLibraryPath.empty();
+        if (!renderDocLibraryPathIsGiven) {
+            // Look into default places
 #ifdef _WIN32
-        renderdocLib = SharedLibrary::open(R"(C:\Program Files\RenderDoc\renderdoc.dll)");
+            renderDocLibraryPath = R"(C:\Program Files\RenderDoc\renderdoc.dll)";
+#elif defined(__APPLE__)
+            renderDocLibraryPath = "librenderdoc.dylib";
 #elif defined(__linux__)
-        renderdocLib = SharedLibrary::open("librenderdoc.so");
+            renderDocLibraryPath = "librenderdoc.so";
+#else
+            renderDocLibraryPath = "librenderdoc";
 #endif
+        }
+
+        SharedLibrary* renderdocLib = nullptr;
+        renderdocLib = SharedLibrary::open(renderDocLibraryPath.c_str());
         impl->m_renderDoc = gfxstream::host::RenderDoc::create(renderdocLib);
         if (impl->m_renderDoc) {
-            GFXSTREAM_INFO("RenderDoc integration enabled.");
             renderDocMultipleVkInstances =
                 std::make_unique<gfxstream::host::RenderDocWithMultipleVkInstances>(
                     *impl->m_renderDoc);
@@ -1121,9 +1200,34 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
                 GFXSTREAM_ERROR(
                     "Failed to initialize RenderDoc with multiple VkInstances. Can't capture any "
                     "information from guest VkInstances with RenderDoc.");
+            } else {
+                const std::string capturePath = gfxstream::base::getEnvironmentVariable(
+                    ANDROID_EMU_RENDERDOC_CAPTURE_PATH_TEMPLATE_ENVVAR);
+                if (capturePath.empty()) {
+                    GFXSTREAM_INFO(
+                        "RenderDoc integration is enabled. Using default capture path, use "
+                        "%s to change.",
+                        ANDROID_EMU_RENDERDOC_CAPTURE_PATH_TEMPLATE_ENVVAR);
+                } else {
+                    renderDocMultipleVkInstances->setCaptureFilePathTemplate(capturePath);
+                    GFXSTREAM_INFO("RenderDoc integration is enabled. Capture path template: %s",
+                                   capturePath.c_str());
+                }
             }
+        } else {
+            std::string errorMsg =
+                "ANDROID_EMU_RENDERDOC is set, but RenderDoc integration cannot be enabled.";
+            // Give a hint to ask user set an envvar to setup the library path
+            if (renderDocLibraryPathIsGiven) {
+                errorMsg += " ANDROID_EMU_RENDERDOC_LIBRARY_PATH is set to ";
+                errorMsg += renderDocLibraryPath;
+            } else {
+                errorMsg += " Use ANDROID_EMU_RENDERDOC_LIBRARY_PATH to set correct path";
+            }
+            GFXSTREAM_ERROR(errorMsg.c_str());
         }
     }
+
     // Initialize Vulkan emulation state
     //
     // Note: This must happen before any use of s_egl,
@@ -1132,7 +1236,7 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
     // preventing new contexts from being created that share
     // against those contexts.
     vk::VulkanDispatch* vkDispatch = nullptr;
-    if (impl->m_features.Vulkan.enabled) {
+    if (impl->m_features.Vulkan.enabled()) {
         vkDispatch = vk::vkDispatch(false /* not for testing */);
 
         gfxstream::host::BackendCallbacks callbacks{
@@ -1177,42 +1281,98 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
 #endif
         };
         impl->m_emulationVk = vk::VkEmulation::create(vkDispatch, callbacks, impl->m_features);
-        if (impl->m_emulationVk) {
-            vk::VkDecoderGlobalState::initialize(impl->m_emulationVk.get());
-        } else {
+        if (!impl->m_emulationVk) {
             GFXSTREAM_ERROR(
-                "Failed to initialize global Vulkan emulation. Disable the Vulkan support.");
-        }
-    }
-    if (impl->m_emulationVk) {
-        impl->m_vulkanEnabled = true;
-        if (impl->m_features.VulkanNativeSwapchain.enabled) {
-            impl->m_vkInstance = impl->m_emulationVk->getInstance();
-        }
+                "Failed to initialize global Vulkan emulation requested. Try updating your GPU "
+                "drivers, using software rendering or disabling Vulkan feature support.");
 
-        auto vulkanUuidOpt = impl->m_emulationVk->getDeviceUuid();
-        if (vulkanUuidOpt) {
-            impl->m_vulkanUUID = *vulkanUuidOpt;
+#ifdef CONFIG_AEMU
+            // This happens frequently enough to try to recover by disabling Vulkan support
+            if (impl->m_features.VulkanNativeSwapchain.enabled() ||
+                impl->m_features.GuestVulkanOnly.enabled()) {
+                // Do not try to recover if Vulkan is mandatory for other features
+                GFXSTREAM_ERROR(
+                    "Requested Vulkan related features, but Vulkan could not be initialized!");
+                return nullptr;
+            } else {
+                GFXSTREAM_WARNING(
+                    "Emulator will try disabling Vulkan support, this is an unsupported path.");
+                impl->m_vulkanEnabled = false;
+                impl->m_vkInstance = VK_NULL_HANDLE;
+                impl->m_features.Vulkan.setEnabled(false);
+            }
+#else
+            return nullptr;
+#endif
         } else {
-            GFXSTREAM_WARNING("Doesn't support id properties, no vulkan device UUID");
+            impl->m_vulkanEnabled = true;
+            if (impl->m_features.VulkanNativeSwapchain.enabled()) {
+                impl->m_vkInstance = impl->m_emulationVk->getInstance();
+            }
+
+            auto vulkanUuidOpt = impl->m_emulationVk->getDeviceUuid();
+            if (vulkanUuidOpt) {
+                impl->m_vulkanUUID = *vulkanUuidOpt;
+            } else {
+                GFXSTREAM_WARNING("Doesn't support id properties, no vulkan device UUID");
+            }
         }
     }
 
 #if GFXSTREAM_ENABLE_HOST_GLES
-    // Do not initialize GL emulation if the guest is using ANGLE.
-    const bool needEmulationGl = !impl->m_features.GuestVulkanOnly.enabled;
-    if (needEmulationGl) {
-        impl->m_emulationGl =
-            EmulationGl::create(width, height, impl->m_features, useSubWindow);
-        if (!impl->m_emulationGl) {
-            GFXSTREAM_ERROR("Failed to initialize GL emulation.");
+    const bool needEmulationGl = !impl->m_features.GuestVulkanOnly.enabled();
+#ifdef CONFIG_AEMU
+    // Always initialize EGL/GLES dispatchers for the Android Emulator, as they
+    // are needed for offscreen rendering on qemu-level.
+    const bool needGlDispatchers = true;
+#else
+    const bool needGlDispatchers = needEmulationGl;
+#endif
+    if (needGlDispatchers) {
+        if (!EmulationGl::initDispatchers(impl->m_features.EglOnEgl.enabled())) {
+            GFXSTREAM_ERROR("Failed to initialize GL dispatchers.");
             return nullptr;
+        }
+
+        // Do not initialize GL emulation if the guest is using ANGLE.
+        if (needEmulationGl) {
+            impl->m_emulationGl =
+                EmulationGl::create(width, height, impl->m_features, useSubWindow);
+            if (!impl->m_emulationGl) {
+                GFXSTREAM_ERROR("Failed to initialize GL emulation.");
+                return nullptr;
+            }
         }
     }
 #endif
 
-    impl->m_useVulkanComposition =
-        impl->m_features.GuestVulkanOnly.enabled || impl->m_features.VulkanNativeSwapchain.enabled;
+    impl->m_useVulkanComposition = impl->m_emulationVk &&
+        (impl->m_features.GuestVulkanOnly.enabled() || impl->m_features.VulkanNativeSwapchain.enabled());
+
+    uint32_t maxApiVersion = VK_API_VERSION_1_3;
+    if (impl->m_emulationVk) {
+        std::optional<uint32_t> featureMaxApiVersion =
+            impl->m_features.GuestVulkanMaxApiVersion.getValue();
+        if (featureMaxApiVersion) {
+            GFXSTREAM_DEBUG("%s: Maximum Vulkan API version will be limited", __func__);
+            maxApiVersion = featureMaxApiVersion.value();
+        } else {
+            // Use maximum available by default
+            maxApiVersion = impl->m_emulationVk->vulkanInstanceVersion();
+            // On Android, CTS will not allow supporting higher Vulkan API versions, limit
+            // them by setting up the maximum api version for the emulation.
+            // TODO: Use android.hardware.vulkan.version system property
+            const int guest_android_api_level = get_gfxstream_guest_android_api_level();
+            if (guest_android_api_level != -1 && guest_android_api_level < 37 &&
+                maxApiVersion > VK_API_VERSION_1_3) {
+                // Older system images should not expose higher than Vulkan 1.3
+                GFXSTREAM_DEBUG(
+                    "%s: Guest API level: %d, maximum Vulkan API version will be limited to 1.3",
+                    __func__, get_gfxstream_guest_android_api_level());
+                maxApiVersion = VK_API_VERSION_1_3;
+            }
+        }
+    }
 
     vk::VkEmulation::Features vkEmulationFeatures = {
         .glInteropSupported = false,  // Set later.
@@ -1224,13 +1384,15 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
                 "ANDROID_EMU_VK_DISABLE_USE_CREATE_RESOURCES_WITH_REQUIREMENTS")
                 .empty(),
         .useVulkanComposition = impl->m_useVulkanComposition,
-        .useVulkanNativeSwapchain = impl->m_features.VulkanNativeSwapchain.enabled,
+        .useVulkanNativeSwapchain = impl->m_features.VulkanNativeSwapchain.enabled(),
         .guestRenderDoc = std::move(renderDocMultipleVkInstances),
         .astcLdrEmulationMode = AstcEmulationMode::Gpu,
         .enableEtc2Emulation = true,
         .enableYcbcrEmulation = false,
-        .guestVulkanOnly = impl->m_features.GuestVulkanOnly.enabled,
+        .guestVulkanOnly = impl->m_features.GuestVulkanOnly.enabled(),
         .useDedicatedAllocations = false,  // Set later.
+        .guestVulkanMaxApiVersion = maxApiVersion,
+        .enableProtectedMemoryEmulation = impl->m_features.VulkanProtectedMemoryEmulation.enabled(),
     };
 
     //
@@ -1238,8 +1400,8 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
     // current-context when asked for them.
     //
     bool useVulkanGraphicsDiagInfo = impl->m_emulationVk &&
-                                     impl->m_features.VulkanNativeSwapchain.enabled &&
-                                     impl->m_features.GuestVulkanOnly.enabled;
+                                     impl->m_features.VulkanNativeSwapchain.enabled() &&
+                                     impl->m_features.GuestVulkanOnly.enabled();
 
     if (useVulkanGraphicsDiagInfo) {
         impl->m_graphicsAdapterVendor = impl->m_emulationVk->getGpuVendor();
@@ -1305,7 +1467,7 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
 
     GFXSTREAM_DEBUG("glvk interop final: %d", vulkanInteropSupported);
     vkEmulationFeatures.glInteropSupported = vulkanInteropSupported;
-    if (impl->m_emulationVk && impl->m_features.Vulkan.enabled) {
+    if (impl->m_emulationVk && impl->m_features.Vulkan.enabled()) {
         impl->m_emulationVk->initFeatures(std::move(vkEmulationFeatures));
 
         auto* display = impl->m_emulationVk->getDisplay();
@@ -1316,18 +1478,19 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
     }
 
     if (impl->m_emulationVk && impl->m_useVulkanComposition) {
-        impl->m_compositor = impl->m_emulationVk->getCompositor();
-        if (!impl->m_compositor) {
-            GFXSTREAM_ERROR("Failed to get CompositorVk from VkEmulation.");
-            return nullptr;
-        }
         GFXSTREAM_DEBUG("Performing composition using CompositorVk.");
+        impl->m_compositor = impl->m_emulationVk->getCompositor();
     } else {
-        GFXSTREAM_DEBUG("Performing composition using CompositorGl.");
 #if GFXSTREAM_ENABLE_HOST_GLES
-        auto compositorGl = impl->m_emulationGl->getCompositor();
-        impl->m_compositor = compositorGl;
+        if (impl->m_emulationGl) {
+            GFXSTREAM_DEBUG("Performing composition using CompositorGl.");
+            impl->m_compositor = impl->m_emulationGl->getCompositor();
+        }
 #endif
+    }
+    if (!impl->m_compositor) {
+        GFXSTREAM_ERROR("Failed to initialize the compositor.");
+        return nullptr;
     }
 
 #if GFXSTREAM_ENABLE_HOST_GLES
@@ -1359,6 +1522,11 @@ std::unique_ptr<FrameBuffer::Impl> FrameBuffer::Impl::Create(FrameBuffer* frameb
 #endif
     }
 
+    // VkDecoderGlobalState must be initialized after m_emulationVk initialization is complete
+    if (impl->m_vulkanEnabled) {
+        vk::VkDecoderGlobalState::initialize(impl->m_emulationVk.get());
+    }
+
     // Start up the single sync thread. If we are using Vulkan native
     // swapchain, then don't initialize SyncThread worker threads with EGL
     // contexts.
@@ -1383,13 +1551,23 @@ FrameBuffer::Impl::Impl(FrameBuffer* framebuffer, int p_width, int p_height,
       m_windowHeight(p_height),
       m_useSubWindow(useSubWindow),
       m_fpsStats(getenv("SHOW_FPS_STATS") != nullptr),
-      m_readbackThread([this](FrameBuffer::Impl::Readback&& readback) {
-          return sendReadbackWorkerCmd(readback);
-      }),
-      m_refCountPipeEnabled(features.RefCountPipe.enabled),
-      m_noDelayCloseColorBufferEnabled(features.NoDelayCloseColorBuffer.enabled ||
-                                       features.Minigbm.enabled),
-      m_postThread([this](Post&& post) { return postWorkerFunc(post); }) {
+      m_readbackThread(
+        []() {
+            GFXSTREAM_TRACE_NAME_THREAD("Gfxstream Readback Worker");
+        },
+        [this](FrameBuffer::Impl::Readback&& readback) {
+            return sendReadbackWorkerCmd(readback);
+        }),
+      m_refCountPipeEnabled(features.RefCountPipe.enabled()),
+      m_noDelayCloseColorBufferEnabled(features.NoDelayCloseColorBuffer.enabled() ||
+                                       features.Minigbm.enabled()),
+      m_postThread(
+        []() {
+            GFXSTREAM_TRACE_NAME_THREAD("Gfxstream Post Worker");
+        },
+        [this](Post&& post) {
+            return postWorkerFunc(post);
+        }) {
     mDisplayActiveConfigId = 0;
     mDisplayConfigs[0] = {p_width, p_height, 160, 160};
     uint32_t displayId = 0;
@@ -1459,6 +1637,7 @@ FrameBuffer::Impl::~Impl() {
         m_emulationGl.reset();
     }
     if (m_emulationVk) {
+        vk::VkDecoderGlobalState::reset();
         m_emulationVk.reset();
     }
 }
@@ -1575,11 +1754,9 @@ std::future<void> FrameBuffer::Impl::sendPostWorkerCmd(Post post) {
     res.wait();
     if (shouldPostOnlyOnMainThread && (PostCmd::Screenshot == post.cmd) &&
         get_gfxstream_window_operations().is_current_thread_ui_thread()) {
-        post.cb->readToBytesScaled(post.screenshot.screenwidth, post.screenshot.screenheight,
-                                   post.screenshot.rotation, post.screenshot.rect,
-                                   post.screenshot.pixelsFormat,
-                                   post.screenshot.pixels,
-                                   post.colorTransform);
+        getColorBufferScreenshot(post.cb, post.screenshot.screenwidth, post.screenshot.screenheight,
+                                 post.screenshot.rotation, post.screenshot.pixelsFormat,
+                                 post.screenshot.pixels, post.screenshot.rect, post.colorTransform);
     } else {
         std::future<void> completeFuture =
             m_postThread.enqueue(Post(std::move(post)));
@@ -1819,6 +1996,14 @@ bool FrameBuffer::Impl::setupSubWindow(FBNativeWindowType p_window, int wx, int 
                     clearCmd.cmd = PostCmd::Clear;
                     sendPostWorkerCmd(std::move(clearCmd));
                 }
+            } else {
+                if (m_lastPostedColorBuffer) {
+                    GFXSTREAM_DEBUG("setupSubwindow: draw last posted cb");
+                    postImpl(m_lastPostedColorBuffer,
+                        [](std::shared_future<void> waitForGpu) {
+                            waitForGpu.wait();
+                        }, false);
+                }
             }
             m_windowContentFullWidth = fbw;
             m_windowContentFullHeight = fbh;
@@ -1903,7 +2088,12 @@ HandleType FrameBuffer::Impl::createColorBuffer(int p_width, int p_height, Gfxst
     sweepColorBuffersLocked();
     AutoLock colorBufferMapLock(m_colorBufferMapLock);
 
-    return createColorBufferWithResourceHandleLocked(p_width, p_height, format, genHandle_locked());
+    HandleType handle = genHandle_locked();
+    if (!createColorBufferWithResourceHandleLocked(p_width, p_height, format, handle)) {
+        GFXSTREAM_ERROR("Failed to create color buffer with resource handle");
+        return 0;
+    }
+    return handle;
 }
 
 HandleType FrameBuffer::Impl::createColorBufferDeprecated(int width, int height,
@@ -1911,15 +2101,15 @@ HandleType FrameBuffer::Impl::createColorBufferDeprecated(int width, int height,
                                                           FrameworkFormat frameworkFormat) {
     auto formatOpt = GetGfxstreamFormat(m_features, internalFormat, frameworkFormat);
     if (!formatOpt) {
-        GFXSTREAM_FATAL("Failed to convert gl-format:%d framework-format:%d",
-                        internalFormat, frameworkFormat);
+        GFXSTREAM_ERROR("Failed to convert gl-format:%d framework-format:%d", internalFormat,
+                        frameworkFormat);
         return 0;
     }
     auto format = *formatOpt;
     return createColorBuffer(width, height, format);
 }
 
-void FrameBuffer::Impl::createColorBufferWithResourceHandle(int p_width, int p_height,
+bool FrameBuffer::Impl::createColorBufferWithResourceHandle(int p_width, int p_height,
                                                             GfxstreamFormat format,
                                                             HandleType handle) {
     {
@@ -1930,38 +2120,41 @@ void FrameBuffer::Impl::createColorBufferWithResourceHandle(int p_width, int p_h
 
         // Check for handle collision
         if (m_colorbuffers.count(handle) != 0) {
-            GFXSTREAM_FATAL("ColorBuffer:%d already exists!", handle);
+            GFXSTREAM_ERROR("ColorBuffer:%d already exists!", handle);
+            return false;
         }
 
-        createColorBufferWithResourceHandleLocked(p_width, p_height, format, handle);
+        if (!createColorBufferWithResourceHandleLocked(p_width, p_height, format, handle)) {
+            GFXSTREAM_ERROR("Could not create color buffer");
+            return false;
+        }
     }
+
+    return true;
 }
 
-void FrameBuffer::Impl::createColorBufferWithResourceHandleDeprecated(
-        int width,
-        int height,
-        GLenum internalFormat,
-        FrameworkFormat frameworkFormat,
-        HandleType handle) {
+bool FrameBuffer::Impl::createColorBufferWithResourceHandleDeprecated(
+    int width, int height, GLenum internalFormat, FrameworkFormat frameworkFormat,
+    HandleType handle) {
     auto formatOpt = GetGfxstreamFormat(m_features, internalFormat, frameworkFormat);
     if (!formatOpt) {
-        GFXSTREAM_FATAL("Failed to convert gl-format:%d framework-format:%d",
-                        internalFormat, frameworkFormat);
-        return;
+        GFXSTREAM_ERROR("Failed to convert gl-format:%d framework-format:%d", internalFormat,
+                        frameworkFormat);
+        return false;
     }
     auto format = *formatOpt;
     return createColorBufferWithResourceHandle(width, height, format, handle);
 }
 
-HandleType FrameBuffer::Impl::createColorBufferWithResourceHandleLocked(
-        int p_width, int p_height, GfxstreamFormat format,
-        HandleType handle) {
-    ColorBufferPtr cb =
-        ColorBuffer::create(m_emulationGl.get(), m_emulationVk.get(), p_width, p_height,
-                            format, handle, nullptr /*stream*/);
+bool FrameBuffer::Impl::createColorBufferWithResourceHandleLocked(int p_width, int p_height,
+                                                                  GfxstreamFormat format,
+                                                                  HandleType handle) {
+    ColorBufferPtr cb = ColorBuffer::create(m_emulationGl.get(), m_emulationVk.get(), p_width,
+                                            p_height, format, handle, nullptr /*stream*/);
     if (cb.get() == nullptr) {
-        GFXSTREAM_FATAL("Failed to create ColorBuffer:%d format:%d with:%d height:%d",
-                        handle, format, p_width, p_height);
+        GFXSTREAM_ERROR("Failed to create ColorBuffer:%d format:%d with:%d height:%d", handle,
+                        format, p_width, p_height);
+        return false;
     }
 
     assert(m_colorbuffers.count(handle) == 0);
@@ -1989,41 +2182,43 @@ HandleType FrameBuffer::Impl::createColorBufferWithResourceHandleLocked(
         }
     }
 
-    return handle;
+    return true;
 }
 
 HandleType FrameBuffer::Impl::createBuffer(uint64_t p_size, uint32_t memoryProperty) {
     AutoLock mutex(m_lock);
     AutoLock colorBufferMapLock(m_colorBufferMapLock);
-    return createBufferWithResourceHandleLocked(p_size, genHandle_locked(), memoryProperty);
+    HandleType handle = genHandle_locked();
+    if (!createBufferWithResourceHandleLocked(p_size, handle, memoryProperty)) {
+        GFXSTREAM_ERROR("Failed to create buffer");
+        return 0;
+    }
+    return handle;
 }
 
-void FrameBuffer::Impl::createBufferWithResourceHandle(uint64_t size, HandleType handle) {
+bool FrameBuffer::Impl::createBufferWithResourceHandle(uint64_t size, HandleType handle) {
     AutoLock mutex(m_lock);
     AutoLock colorBufferMapLock(m_colorBufferMapLock);
 
-    if (m_buffers.count(handle) != 0) {
-        GFXSTREAM_FATAL("Buffer already exists with handle %d", handle);
-    }
-
-    createBufferWithResourceHandleLocked(size, handle, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    return createBufferWithResourceHandleLocked(size, handle, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 }
 
-HandleType FrameBuffer::Impl::createBufferWithResourceHandleLocked(int p_size, HandleType handle,
-                                                                   uint32_t memoryProperty) {
+bool FrameBuffer::Impl::createBufferWithResourceHandleLocked(uint64_t p_size, HandleType handle,
+                                                             uint32_t memoryProperty) {
     if (m_buffers.count(handle) != 0) {
-        GFXSTREAM_FATAL("Buffer already exists with handle %d", handle);
+        GFXSTREAM_ERROR("Buffer already exists with handle %d", handle);
+        return false;
     }
 
     BufferPtr buffer(Buffer::create(m_emulationGl.get(), m_emulationVk.get(), p_size, handle));
     if (!buffer) {
         GFXSTREAM_ERROR("Create buffer failed.");
-        return 0;
+        return false;
     }
 
     m_buffers[handle] = {std::move(buffer)};
 
-    return handle;
+    return true;
 }
 
 int FrameBuffer::Impl::openColorBuffer(HandleType p_colorbuffer) {
@@ -2234,9 +2429,6 @@ void FrameBuffer::Impl::cleanupProcGLObjects(uint64_t puid) {
             [puid, &renderThreadWithThisPuidExists](RenderThreadInfo* i) {
             if (i->m_puid == puid) {
                 renderThreadWithThisPuidExists = true;
-
-                bool shouldExit = false;
-                i->m_shouldExit.compare_exchange_strong(shouldExit, true);
             }
         });
         gfxstream::base::sleepUs(10000);
@@ -2760,7 +2952,7 @@ int FrameBuffer::Impl::getScreenshot(unsigned int nChannels, unsigned int* width
 #endif
 
     AutoLock mutex(m_lock);
-    uint32_t w, h, cb, screenWidth, screenHeight;
+    uint32_t w, h, cb;
     if (!get_gfxstream_multi_display_operations().get_display_info(displayId, nullptr, nullptr, &w,
                                                                    &h, nullptr, nullptr, nullptr)) {
         GFXSTREAM_ERROR("Screenshot of invalid display %d", displayId);
@@ -2788,8 +2980,14 @@ int FrameBuffer::Impl::getScreenshot(unsigned int nChannels, unsigned int* width
         return -1;
     }
 
-    screenWidth = (desiredWidth == 0) ? w : desiredWidth;
-    screenHeight = (desiredHeight == 0) ? h : desiredHeight;
+    // Find screen resolution based on desired resolution and display layout
+    std::optional<Compositor::DisplayLayout> displayLayout = m_compositor->getDisplayLayout();
+    int screenWidth = (desiredWidth != 0)
+                          ? desiredWidth
+                          : (displayLayout.has_value() ? displayLayout->screenWidth : w);
+    int screenHeight = (desiredHeight != 0)
+                           ? desiredHeight
+                           : (displayLayout.has_value() ? displayLayout->screenHeight : h);
 
     bool useSnipping = (rect.size.w != 0 && rect.size.h != 0);
     if (useSnipping) {
@@ -2821,7 +3019,7 @@ int FrameBuffer::Impl::getScreenshot(unsigned int nChannels, unsigned int* width
 
     if (*cPixels < (size_t)needed) {
         *cPixels = needed;
-        return -2;
+        return Renderer::GET_SCREENSHOT_RESULT_PIXELS_SIZE;
     }
     *cPixels = needed;
     if (desiredRotation == GFXSTREAM_ROTATION_90 || desiredRotation == GFXSTREAM_ROTATION_270) {
@@ -2871,6 +3069,56 @@ int FrameBuffer::Impl::getScreenshot(unsigned int nChannels, unsigned int* width
 
     mutex.unlock();
     completeFuture.wait();
+    return 0;
+}
+
+int FrameBuffer::Impl::getColorBufferScreenshot(
+    ColorBuffer* cb, int targetWidth, int targetHeight, int skinRotation,
+    GfxstreamFormat pixelsFormat, void* outPixels, const Rect& rect,
+    const std::optional<std::array<float, 16>>& colorTransform) {
+    uint8_t* outPixelsRGBA = reinterpret_cast<uint8_t*>(outPixels);
+    const int numChannels = (pixelsFormat == GfxstreamFormat::R8G8B8_UNORM) ? 3 : 4;
+
+    // Adjust display rendering if a layout is given
+    Rect scaledDisplayRect = {};
+    if (m_compositor->getScaledDisplayRect(scaledDisplayRect, targetWidth, targetHeight)) {
+        // Read the color buffer into a temporary storage
+        std::vector<uint8_t> tempBuffer;
+        tempBuffer.resize(scaledDisplayRect.size.w * scaledDisplayRect.size.h * numChannels);
+        cb->readToBytesScaled(scaledDisplayRect.size.w, scaledDisplayRect.size.h, skinRotation,
+                              rect, pixelsFormat, tempBuffer.data(), colorTransform);
+
+        // Copy color buffer into solid black background, based on display layout parameters
+        // TODO(b/485981055): optimize this
+        for (int y = 0; y < targetHeight; y++) {
+            for (int x = 0; x < targetWidth; x++) {
+                const int outPixelIndex = y * targetWidth + x;
+                const int cbX = (x - scaledDisplayRect.pos.x);
+                const int cbY = (y - scaledDisplayRect.pos.y);
+
+                // Check if the pixel is inside the display area
+                const bool sampleCB = cbX >= 0 && cbX < scaledDisplayRect.size.w && cbY >= 0 &&
+                                      cbY < scaledDisplayRect.size.h;
+                const int cbPixelIndex = cbY * scaledDisplayRect.size.w + cbX;
+                for (int c = 0; c < numChannels; c++) {
+                    if (sampleCB) {
+                        outPixelsRGBA[outPixelIndex * numChannels + c] =
+                            tempBuffer[cbPixelIndex * numChannels + c];
+                    } else {
+                        // outside of the display area, put black with solid alpha
+                        outPixelsRGBA[outPixelIndex * numChannels + c] = (c == 3) ? 255 : 0;
+                    }
+                }
+            }
+        }
+    } else {
+        // Optimized path, directly load the color buffer into the output pixels
+        cb->readToBytesScaled(targetWidth, targetHeight, skinRotation, rect, pixelsFormat,
+                              outPixels, colorTransform);
+    }
+
+    applyScreenshotBackground(targetWidth, targetHeight, numChannels, outPixelsRGBA);
+
     return 0;
 }
 
@@ -3083,7 +3331,7 @@ void FrameBuffer::Impl::onSave(Stream* stream, const ITextureSaverPtr& textureSa
 #endif
 
     // TODO(b/309858017): remove if when ready to bump snapshot version
-    if (m_features.VulkanSnapshots.enabled) {
+    if (m_features.VulkanSnapshots.enabled()) {
         AutoLock procResourceLock(m_procOwnedResourcesLock);
         stream->putBe64(m_procOwnedResources.size());
         for (const auto& element : m_procOwnedResources) {
@@ -3093,7 +3341,7 @@ void FrameBuffer::Impl::onSave(Stream* stream, const ITextureSaverPtr& textureSa
     }
 
     // Save Vulkan state
-    if (m_features.VulkanSnapshots.enabled && vk::VkDecoderGlobalState::get()) {
+    if (m_features.VulkanSnapshots.enabled() && vk::VkDecoderGlobalState::get()) {
         vk::VkDecoderGlobalState::get()->save(stream);
     }
 
@@ -3321,7 +3569,7 @@ bool FrameBuffer::Impl::onLoad(Stream* stream, const ITextureLoaderPtr& textureL
     loadProcOwnedCollection(stream, &m_procOwnedEmulatedEglContexts);
 #endif
     // TODO(b/309858017): remove if when ready to bump snapshot version
-    if (m_features.VulkanSnapshots.enabled) {
+    if (m_features.VulkanSnapshots.enabled()) {
         size_t resourceCount = stream->getBe64();
         for (size_t i = 0; i < resourceCount; i++) {
             uint64_t puid = stream->getBe64();
@@ -3366,7 +3614,7 @@ bool FrameBuffer::Impl::onLoad(Stream* stream, const ITextureLoaderPtr& textureL
     }
 
     // Restore Vulkan state
-    if (m_features.VulkanSnapshots.enabled && vk::VkDecoderGlobalState::get()) {
+    if (m_features.VulkanSnapshots.enabled() && vk::VkDecoderGlobalState::get()) {
         lock.unlock();
         GfxApiLogger gfxLogger;
         vk::VkDecoderGlobalState::get()->load(stream, gfxLogger);
@@ -3616,7 +3864,7 @@ void FrameBuffer::Impl::setDisplayActiveConfig(int configId) {
     m_framebufferWidth = mDisplayConfigs[configId].w;
     m_framebufferHeight = mDisplayConfigs[configId].h;
     setDisplayPose(0, 0, 0, getWidth(), getHeight(), 0);
-    GFXSTREAM_INFO("setDisplayActiveConfig %d", configId);
+    GFXSTREAM_INFO("%s: id:%d, %dx%d", __func__, configId, m_framebufferWidth, m_framebufferHeight);
 }
 
 int FrameBuffer::Impl::getDisplayConfigsCount() {
@@ -3685,7 +3933,7 @@ bool FrameBuffer::Impl::invalidateColorBufferForVk(HandleType colorBufferHandle)
     AutoLock mutex(m_lock);
     auto colorBuffer = findColorBuffer(colorBufferHandle);
     if (!colorBuffer) {
-        GFXSTREAM_DEBUG("Failed to find ColorBuffer: %d", colorBufferHandle);
+        GFXSTREAM_ERROR("Failed to find ColorBuffer: %d", colorBufferHandle);
         return false;
     }
     return colorBuffer->invalidateForVk();
@@ -3750,8 +3998,47 @@ void FrameBuffer::Impl::setScreenMask(int width, int height, const uint8_t* rgba
 }
 
 void FrameBuffer::Impl::setScreenBackground(int width, int height, const uint8_t* rgbaData) {
-    ENSURE_GL_EMULATION_VOID();
-    m_emulationGl->mTextureDraw->setScreenBackground(width, height, rgbaData);
+    // Avoid processing the call before initializing or after finalizing the framebuffer
+    if (!sInitialized.load(std::memory_order_relaxed)) {
+        GFXSTREAM_DEBUG("%s called in an invalid state.", __func__);
+        return;
+    }
+
+    size_t prevImageSize = mScreenBackgroundImage.m_rgbaData.size();
+    if (rgbaData) {
+        mScreenBackgroundImage.m_width = width;
+        mScreenBackgroundImage.m_height = height;
+        mScreenBackgroundImage.m_rgbaData.resize(width * height);
+        memcpy(mScreenBackgroundImage.m_rgbaData.data(), rgbaData, width * height * 4);
+    } else {
+        mScreenBackgroundImage.reset();
+    }
+
+    m_compositor->setScreenBackground(width, height, rgbaData);
+
+    //  Try to update the display at least 30 times a second, in case the guest is not
+    //  updating the display
+    if (m_guestPostedAFrameTime && m_lastPostedColorBuffer) {
+        const std::chrono::milliseconds maxUpdateLatency(1000 / 30);
+        const auto nowTime = std::chrono::steady_clock::now();
+        bool shouldRepost = (nowTime - m_guestPostedAFrameTime.value()) > maxUpdateLatency;
+        if (prevImageSize != mScreenBackgroundImage.m_rgbaData.size()) {
+            // Always repost if the image size has changed, e.g. disabling background image
+            shouldRepost = true;
+        }
+        if (shouldRepost) {
+            // This is same as calling repost(), but without redundant checks and logging
+            postImplSync(m_lastPostedColorBuffer, true, true);
+            m_guestPostedAFrameTime = nowTime;
+            m_framebuffer->fireEvent({FrameBufferChange::FrameReady, mFrameNumber++});
+        }
+    }
+}
+
+void FrameBuffer::Impl::setDisplayLayout(int screenWidth, int screenHeight,
+                                         const Rect& displayRect) {
+    AutoLock mutex(m_lock);
+    m_compositor->setDisplayLayout(screenWidth, screenHeight, displayRect);
 }
 
 #ifdef CONFIG_AEMU
@@ -3794,8 +4081,9 @@ void FrameBuffer::Impl::createSharedTrivialContext(EGLContext* contextOut, EGLSu
 
     ENSURE_GL_EMULATION_VOID();
 
-    const EmulatedEglConfig* config = m_emulationGl->getEmulationEglConfigs().get(0 /* p_config */);
-    if (!config) return;
+    if (m_emulationGl->mEglConfig == EGL_NO_CONFIG) {
+        GFXSTREAM_FATAL("GL/EGL emulation has not chosen a config.");
+    }
 
     int maj, min;
     get_gfxstream_gles_version(&maj, &min);
@@ -3803,12 +4091,12 @@ void FrameBuffer::Impl::createSharedTrivialContext(EGLContext* contextOut, EGLSu
     const EGLint contextAttribs[] = {EGL_CONTEXT_MAJOR_VERSION_KHR, maj,
                                      EGL_CONTEXT_MINOR_VERSION_KHR, min, EGL_NONE};
 
-    *contextOut = s_egl.eglCreateContext(getDisplay(), config->getHostEglConfig(),
+    *contextOut = s_egl.eglCreateContext(getDisplay(), m_emulationGl->mEglConfig,
                                          getGlobalEGLContext(), contextAttribs);
 
     const EGLint pbufAttribs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
 
-    *surfOut = s_egl.eglCreatePbufferSurface(getDisplay(), config->getHostEglConfig(), pbufAttribs);
+    *surfOut = s_egl.eglCreatePbufferSurface(getDisplay(), m_emulationGl->mEglConfig, pbufAttribs);
 }
 
 void FrameBuffer::Impl::destroySharedTrivialContext(EGLContext context, EGLSurface surface) {
@@ -4060,34 +4348,35 @@ void FrameBuffer::Impl::createEmulatedEglFenceSync(EGLenum type, int destroyWhen
         *outSyncThread = reinterpret_cast<uint64_t>(SyncThread::get());
     }
 
-    if (!m_emulationGl) {
-        // Avoid spamming the logs
-        // TODO(b/442393728): avoid calls to this function in GuestAngle mode
-        static bool logged_once = false;
-        if (!logged_once) {
-            GFXSTREAM_WARNING("%s is called in vulkan-only mode.", __PRETTY_FUNCTION__);
-            logged_once = true;
+    if (m_emulationGl) {
+        // TODO(b/233939967): move RenderThreadInfoGl usage to EmulationGl.
+        RenderThreadInfoGl* const info = RenderThreadInfoGl::get();
+        if (!info) {
+            GFXSTREAM_FATAL("RenderThreadGL not available.");
         }
-        return;
-    }
+        if (!info->currContext) {
+            uint32_t syncContext;
+            uint32_t syncSurface;
+            createTrivialContext(0,  // There is no context to share.
+                                &syncContext, &syncSurface);
+            bindContext(syncContext, syncSurface, syncSurface);
+            // This context is then cleaned up when the render thread exits.
+        }
 
-    // TODO(b/233939967): move RenderThreadInfoGl usage to EmulationGl.
-    RenderThreadInfoGl* const info = RenderThreadInfoGl::get();
-    if (!info) {
-        GFXSTREAM_FATAL("RenderThreadGL not available.");
+        auto sync = m_emulationGl->createEmulatedEglFenceSync(type, destroyWhenSignaled);
+        if (sync && outSync) {
+            *outSync = (uint64_t)(uintptr_t)sync.release();
+        }
     }
-    if (!info->currContext) {
-        uint32_t syncContext;
-        uint32_t syncSurface;
-        createTrivialContext(0,  // There is no context to share.
-                             &syncContext, &syncSurface);
-        bindContext(syncContext, syncSurface, syncSurface);
-        // This context is then cleaned up when the render thread exits.
+    else if (m_emulationVk) {
+        // No-op: compose operations using this callback will be waited on the futures
+        // generated before processing later rc commands. This ensures CPU and GPU
+        // synchronization is established for non-async compose scenarios, where this
+        // codepath is used via HostFrameComposer on non-virtiogpu/minigbm images.
+        // Egl fences are not used on newer images with virtiogpu/minigbm.
     }
-
-    auto sync = m_emulationGl->createEmulatedEglFenceSync(type, destroyWhenSignaled);
-    if (sync && outSync) {
-        *outSync = (uint64_t)(uintptr_t)sync.release();
+    else {
+        GFXSTREAM_FATAL("Unimplemented");
     }
 }
 
@@ -4402,7 +4691,7 @@ bool FrameBuffer::Impl::flushColorBufferFromGl(HandleType colorBufferHandle) {
 bool FrameBuffer::Impl::invalidateColorBufferForGl(HandleType colorBufferHandle) {
     auto colorBuffer = findColorBuffer(colorBufferHandle);
     if (!colorBuffer) {
-        GFXSTREAM_DEBUG("Failed to find ColorBuffer: %d", colorBufferHandle);
+        GFXSTREAM_ERROR("Failed to find ColorBuffer: %d", colorBufferHandle);
         return false;
     }
     return colorBuffer->invalidateForGl();
@@ -4442,6 +4731,16 @@ bool FrameBuffer::Impl::bindColorBufferToTexture2(HandleType p_colorbuffer) {
     ColorBufferPtr colorBuffer = findColorBuffer(p_colorbuffer);
     if (!colorBuffer) {
         // bad colorbuffer handle
+        return false;
+    }
+
+    if (!colorBuffer->canUseGlOps()) {
+        // cannot call glOpBindToTexture2 without a valid gl colorbuffer
+        static bool errorReported = false;
+        if (!errorReported) {
+            GFXSTREAM_ERROR("%s: Cannot use GL colorbuffer operations", __func__);
+            errorReported = true;
+        }
         return false;
     }
 
@@ -4661,19 +4960,6 @@ void FrameBuffer::Impl::swapTexturesAndUpdateColorBuffer(uint32_t p_colorbuffer,
     }
 }
 
-bool FrameBuffer::Impl::readColorBufferContents(HandleType p_colorbuffer, size_t* numBytes,
-                                                void* pixels) {
-    AutoLock mutex(m_lock);
-
-    ColorBufferPtr colorBuffer = findColorBuffer(p_colorbuffer);
-    if (!colorBuffer) {
-        // bad colorbuffer handle
-        return false;
-    }
-
-    return colorBuffer->glOpReadContents(numBytes, pixels);
-}
-
 void FrameBuffer::Impl::asyncWaitForGpuWithCb(uint64_t eglsync, FenceCompletionCallback cb) {
     EmulatedEglFenceSync* fenceSync = EmulatedEglFenceSync::getFromHandle(eglsync);
 
@@ -4686,19 +4972,11 @@ void FrameBuffer::Impl::asyncWaitForGpuWithCb(uint64_t eglsync, FenceCompletionC
 }
 
 const gl::GLESv2Dispatch* FrameBuffer::Impl::getGles2Dispatch() {
-    if (!m_emulationGl) {
-        // This is ok, returned value should be checked
-        return nullptr;
-    }
-    return m_emulationGl->getGles2Dispatch();
+    return EmulationGl::getGles2Dispatch();
 }
 
 const gl::EGLDispatch* FrameBuffer::Impl::getEglDispatch() {
-    if (!m_emulationGl) {
-        // This is ok, returned value should be checked
-        return nullptr;
-    }
-    return m_emulationGl->getEglDispatch();
+    return EmulationGl::getEglDispatch();
 }
 
 #endif  // GFXSTREAM_ENABLE_HOST_GLES
@@ -4710,6 +4988,40 @@ FrameBuffer::Impl::getRepresentativeColorBufferMemoryTypeInfo() const {
     }
 
     return m_emulationVk->getRepresentativeColorBufferMemoryTypeInfo();
+}
+
+void FrameBuffer::Impl::applyScreenshotBackground(const int width, const int height,
+                                                  const int numChannels, uint8_t* pixelDataInOut) {
+    if (!pixelDataInOut) {
+        return;
+    }
+
+    auto screenBlendComponent = [](uint8_t sourceComponent, uint8_t backgroundComponent) {
+        const int s = static_cast<int>(sourceComponent);
+        const int b = static_cast<int>(backgroundComponent);
+        const int invertedProduct = (255 - s) * (255 - b);
+        const int roundedProduct = (invertedProduct + 127) / 255;
+        return static_cast<uint8_t>(255 - roundedProduct);
+    };
+
+    if (mScreenBackgroundImage.m_rgbaData.size()) {
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                // Provide normalized coords as the background may have a
+                // different resolution
+                const auto backgroundSampled = mScreenBackgroundImage.bilinearSample(
+                    ((float)x + 0.5f) / width, ((float)y + 0.5f) / height);
+
+                const int inputIndex = (y * width + x) * numChannels;
+                pixelDataInOut[inputIndex + 0] =
+                    screenBlendComponent(pixelDataInOut[inputIndex + 0], backgroundSampled.r);
+                pixelDataInOut[inputIndex + 1] =
+                    screenBlendComponent(pixelDataInOut[inputIndex + 1], backgroundSampled.g);
+                pixelDataInOut[inputIndex + 2] =
+                    screenBlendComponent(pixelDataInOut[inputIndex + 2], backgroundSampled.b);
+            }
+        }
+    }
 }
 
 FrameBuffer::~FrameBuffer() = default;
@@ -4724,8 +5036,8 @@ bool FrameBuffer::initialize(int width, int height, const FeatureSet& features, 
 
     std::unique_ptr<FrameBuffer> framebuffer(new FrameBuffer());
 
-    framebuffer->mImpl = FrameBuffer::Impl::Create(framebuffer.get(), width, height, features,
-                                                   useSubWindow);
+    framebuffer->mImpl =
+        FrameBuffer::Impl::Create(framebuffer.get(), width, height, features, useSubWindow);
     if (!framebuffer->mImpl) {
         GFXSTREAM_ERROR("Failed to initialize FrameBuffer().");
         return false;
@@ -4786,37 +5098,38 @@ void FrameBuffer::setPostCallback(Renderer::OnPostCallback onPost, void* onPostC
     mImpl->setPostCallback(onPost, onPostContext, displayId, useBgraReadback);
 }
 
-bool FrameBuffer::isFormatSupported(GfxstreamFormat format) { return mImpl->isFormatSupported(format); }
+bool FrameBuffer::isFormatSupported(GfxstreamFormat format) {
+    return mImpl->isFormatSupported(format);
+}
 
 HandleType FrameBuffer::createColorBuffer(int width, int height, GfxstreamFormat format) {
     return mImpl->createColorBuffer(width, height, format);
 }
 
-HandleType FrameBuffer::createColorBufferDeprecated(
-        int width, int height, GLenum internalFormat, FrameworkFormat frameworkFormat) {
+HandleType FrameBuffer::createColorBufferDeprecated(int width, int height, GLenum internalFormat,
+                                                    FrameworkFormat frameworkFormat) {
     return mImpl->createColorBufferDeprecated(width, height, internalFormat, frameworkFormat);
 }
 
-void FrameBuffer::createColorBufferWithResourceHandle(int width, int height,
-                                                      GfxstreamFormat format,
+bool FrameBuffer::createColorBufferWithResourceHandle(int width, int height, GfxstreamFormat format,
                                                       HandleType handle) {
-    mImpl->createColorBufferWithResourceHandle(width, height, format, handle);
+    return mImpl->createColorBufferWithResourceHandle(width, height, format, handle);
 }
 
-void FrameBuffer::createColorBufferWithResourceHandleDeprecated(int width, int height,
-                                                      GLenum internalFormat,
-                                                      FrameworkFormat frameworkFormat,
-                                                      HandleType handle) {
-    mImpl->createColorBufferWithResourceHandleDeprecated(
-        width, height, internalFormat, frameworkFormat, handle);
+bool FrameBuffer::createColorBufferWithResourceHandleDeprecated(int width, int height,
+                                                                GLenum internalFormat,
+                                                                FrameworkFormat frameworkFormat,
+                                                                HandleType handle) {
+    return mImpl->createColorBufferWithResourceHandleDeprecated(width, height, internalFormat,
+                                                                frameworkFormat, handle);
 }
 
 HandleType FrameBuffer::createBuffer(uint64_t size, uint32_t memoryProperty) {
     return mImpl->createBuffer(size, memoryProperty);
 }
 
-void FrameBuffer::createBufferWithResourceHandle(uint64_t size, HandleType handle) {
-    mImpl->createBufferWithResourceHandle(size, handle);
+bool FrameBuffer::createBufferWithResourceHandle(uint64_t size, HandleType handle) {
+    return mImpl->createBufferWithResourceHandle(size, handle);
 }
 
 int FrameBuffer::openColorBuffer(HandleType p_colorbuffer) {
@@ -4850,9 +5163,10 @@ void FrameBuffer::readColorBuffer(HandleType p_colorbuffer, int x, int y, int wi
 }
 
 void FrameBuffer::readColorBufferDeprecated(HandleType colorbuffer, int x, int y, int width,
-                                       int height, GLenum pixelsFormat, GLenum pixelsType,
-                                       void* pixels, uint64_t pixelsSize) {
-    mImpl->readColorBufferDeprecated(colorbuffer, x, y, width, height, pixelsFormat, pixelsType, pixels, pixelsSize);
+                                            int height, GLenum pixelsFormat, GLenum pixelsType,
+                                            void* pixels, uint64_t pixelsSize) {
+    mImpl->readColorBufferDeprecated(colorbuffer, x, y, width, height, pixelsFormat, pixelsType,
+                                     pixels, pixelsSize);
 }
 
 void FrameBuffer::readColorBufferYUV(HandleType p_colorbuffer, int x, int y, int width, int height,
@@ -4870,16 +5184,17 @@ bool FrameBuffer::updateColorBuffer(HandleType colorbuffer, int x, int y, int wi
 }
 
 bool FrameBuffer::updateColorBufferDeprecated(HandleType colorbuffer, int x, int y, int width,
-                                              int height, GLenum format,
-                                              GLenum type,
+                                              int height, GLenum format, GLenum type,
                                               void* pixels) {
-    return mImpl->updateColorBufferDeprecated(colorbuffer, x, y, width, height, format, type, pixels);
+    return mImpl->updateColorBufferDeprecated(colorbuffer, x, y, width, height, format, type,
+                                              pixels);
 }
 
 bool FrameBuffer::updateColorBufferDeprecated(HandleType colorbuffer, int x, int y, int width,
-                                              int height, GLenum internalFormat, FrameworkFormat frameworkFormat,
-                                              void* pixels) {
-    return mImpl->updateColorBufferDeprecated(colorbuffer, x, y, width, height, internalFormat, frameworkFormat, pixels);
+                                              int height, GLenum internalFormat,
+                                              FrameworkFormat frameworkFormat, void* pixels) {
+    return mImpl->updateColorBufferDeprecated(colorbuffer, x, y, width, height, internalFormat,
+                                              frameworkFormat, pixels);
 }
 
 bool FrameBuffer::post(HandleType p_colorbuffer, bool needLockAndBind) {
@@ -4979,6 +5294,10 @@ void FrameBuffer::setScreenBackground(int width, int height, const uint8_t* rgba
     mImpl->setScreenBackground(width, height, rgbaData);
 }
 
+void FrameBuffer::setDisplayLayout(int screenWidth, int screenHeight, const Rect& displayRect) {
+    mImpl->setDisplayLayout(screenWidth, screenHeight, displayRect);
+}
+
 #ifdef CONFIG_AEMU
 void FrameBuffer::registerVulkanInstance(uint64_t id, const char* appName) const {
     mImpl->registerVulkanInstance(id, appName);
@@ -4996,6 +5315,14 @@ int FrameBuffer::getScreenshot(unsigned int nChannels, unsigned int* width, unsi
                                int desiredHeight, int desiredRotation, Rect rect) {
     return mImpl->getScreenshot(nChannels, width, height, pixels, cPixels, displayId, desiredWidth,
                                 desiredHeight, desiredRotation, rect);
+}
+
+int FrameBuffer::getColorBufferScreenshot(
+    ColorBuffer* cb, int targetWidth, int targetHeight, int skinRotation,
+    GfxstreamFormat pixelsFormat, void* outPixels, const Rect& rect,
+    const std::optional<std::array<float, 16>>& colorTransform) {
+    return mImpl->getColorBufferScreenshot(cb, targetWidth, targetHeight, skinRotation,
+                                           pixelsFormat, outPixels, rect, colorTransform);
 }
 
 void FrameBuffer::onLastColorBufferRef(uint32_t handle) { mImpl->onLastColorBufferRef(handle); }
@@ -5293,10 +5620,14 @@ void FrameBuffer::updateYUVTextures(uint32_t type, uint32_t* textures, void* pri
     mImpl->updateYUVTextures(type, textures, privData, func);
 }
 
-void FrameBuffer::getVulkanEmulationDeviceInfo(char** device_name, char** driver_info, uint32_t* driver_version, uint32_t* api_version, uint32_t* vendor_id, uint32_t* device_id, uint32_t* device_type, uint64_t* device_memory) {
-    mImpl->getVulkanEmulationDeviceInfo(device_name, driver_info, driver_version, api_version, vendor_id, device_id, device_type, device_memory);
+bool FrameBuffer::getVulkanEmulationDeviceInfo(char** device_name, char** driver_info,
+                                               uint32_t* driver_version, uint32_t* api_version,
+                                               uint32_t* vendor_id, uint32_t* device_id,
+                                               uint32_t* device_type, uint64_t* device_memory) {
+    return mImpl->getVulkanEmulationDeviceInfo(device_name, driver_info, driver_version,
+                                               api_version, vendor_id, device_id, device_type,
+                                               device_memory);
 }
-
 
 void FrameBuffer::swapTexturesAndUpdateColorBuffer(uint32_t colorBufferHandle, int x, int y,
                                                    int width, int height, uint32_t format,
@@ -5304,11 +5635,6 @@ void FrameBuffer::swapTexturesAndUpdateColorBuffer(uint32_t colorBufferHandle, i
                                                    uint32_t* textures) {
     mImpl->swapTexturesAndUpdateColorBuffer(colorBufferHandle, x, y, width, height, format, type,
                                             texturesFormat, textures);
-}
-
-bool FrameBuffer::readColorBufferContents(HandleType p_colorbuffer, size_t* numBytes,
-                                          void* pixels) {
-    return mImpl->readColorBufferContents(p_colorbuffer, numBytes, pixels);
 }
 
 void FrameBuffer::asyncWaitForGpuWithCb(uint64_t eglsync, FenceCompletionCallback cb) {
@@ -5326,6 +5652,11 @@ const FeatureSet& FrameBuffer::getFeatures() const { return mImpl->getFeatures()
 RepresentativeColorBufferMemoryTypeInfo FrameBuffer::getRepresentativeColorBufferMemoryTypeInfo()
     const {
     return mImpl->getRepresentativeColorBufferMemoryTypeInfo();
+}
+
+void FrameBuffer::applyScreenshotBackground(const int width, const int height,
+                                            const int numChannels, uint8_t* pixelDataInOut) {
+    return mImpl->applyScreenshotBackground(width, height, numChannels, pixelDataInOut);
 }
 
 }  // namespace host

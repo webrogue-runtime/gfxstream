@@ -26,7 +26,7 @@ EmulatedPhysicalDeviceQueueProperties::EmulatedPhysicalDeviceQueueProperties(
     mQueueFamilyProperties = host;
 
     // Override queueCount for the virtual queue to be provided with device creations
-    mHasVirtualGraphicsQueue = features.VulkanVirtualQueue.enabled;
+    mHasVirtualGraphicsQueue = features.VulkanVirtualQueue.enabled();
     if (mHasVirtualGraphicsQueue) {
         // This feature will enforce multiple queues on all graphics capable phsical queues
         // by creating a virtual queue object, which forwards the work streams into the
@@ -38,8 +38,17 @@ EmulatedPhysicalDeviceQueueProperties::EmulatedPhysicalDeviceQueueProperties(
                 qfp.queueCount = 2;
             }
 
-            // TODO(b/329845987) Protected memory is not supported yet on emulators.
+            // Protected memory is only supported through VulkanProtectedMemoryEmulation
             qfp.queueFlags &= ~VK_QUEUE_PROTECTED_BIT;
+        }
+    }
+
+    // For protected memory emulation, add protected bit to graphics queues
+    if (features.VulkanProtectedMemoryEmulation.enabled()) {
+        for (VkQueueFamilyProperties& qfp : mQueueFamilyProperties) {
+            if (qfp.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                qfp.queueFlags |= VK_QUEUE_PROTECTED_BIT;
+            }
         }
     }
 }

@@ -15,27 +15,34 @@
 #include "virtio_gpu_frontend.h"
 
 #ifdef GFXSTREAM_BUILD_WITH_SNAPSHOT_FRONTEND_SUPPORT
-#include <filesystem>
 #include <fcntl.h>
+
+#include <filesystem>
 // X11 defines status as a preprocessor define which messes up
 // anyone with a `Status` type.
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/text_format.h>
 #endif  // ifdef GFXSTREAM_BUILD_WITH_SNAPSHOT_FRONTEND_SUPPORT
 
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
+
 #include <vulkan/vulkan.h>
 
 #include "frame_buffer.h"
 #include "framework_formats.h"
-#include "vulkan/vk_common_operations.h"
 #include "gfxstream/host/address_space_operations.h"
+#include "vulkan/vk_common_operations.h"
 // TODO: remove after moving save/load interface to ops.
+#include "gfxstream/common/logging.h"
 #include "gfxstream/host/address_space_graphics.h"
 #include "gfxstream/host/file_stream.h"
 #include "gfxstream/host/tracing.h"
 #include "gfxstream/memory/SharedMemory.h"
 #include "gfxstream/threads/WorkerThread.h"
 #include "virtgpu_gfxstream_protocol.h"
+#include "virtio_gpu_timelines.h"
 
 namespace gfxstream {
 namespace host {
@@ -48,6 +55,14 @@ using gfxstream::host::snapshot::VirtioGpuContextSnapshot;
 using gfxstream::host::snapshot::VirtioGpuFrontendSnapshot;
 using gfxstream::host::snapshot::VirtioGpuResourceSnapshot;
 #endif  // ifdef GFXSTREAM_BUILD_WITH_SNAPSHOT_FRONTEND_SUPPORT
+
+// Helper for printing very detailed debug logs
+#define D(...)                            \
+    do {                                  \
+        if (mLogCalls) {                  \
+            GFXSTREAM_DEBUG(__VA_ARGS__); \
+        }                                 \
+    } while (0)
 
 struct VirtioGpuCmd {
     uint32_t op;
@@ -66,19 +81,21 @@ class CleanupThread {
     using GenericCleanup = std::function<void()>;
 
     CleanupThread()
-        : mWorker([](CleanupTask task) {
-              return std::visit(
-                  [](auto&& work) {
-                      using T = std::decay_t<decltype(work)>;
-                      if constexpr (std::is_same_v<T, GenericCleanup>) {
-                          work();
-                          return gfxstream::base::WorkerProcessingResult::Continue;
-                      } else if constexpr (std::is_same_v<T, Exit>) {
-                          return gfxstream::base::WorkerProcessingResult::Stop;
-                      }
-                  },
-                  std::move(task));
-          }) {
+        : mWorker(
+              []() { GFXSTREAM_TRACE_NAME_THREAD("Gfxstream Virtio Gpu Frontend Cleanup Thread"); },
+              [](CleanupTask task) {
+                  return std::visit(
+                      [](auto&& work) {
+                          using T = std::decay_t<decltype(work)>;
+                          if constexpr (std::is_same_v<T, GenericCleanup>) {
+                              work();
+                              return gfxstream::base::WorkerProcessingResult::Continue;
+                          } else if constexpr (std::is_same_v<T, Exit>) {
+                              return gfxstream::base::WorkerProcessingResult::Stop;
+                          }
+                      },
+                      std::move(task));
+              }) {
         mWorker.start();
     }
 
@@ -94,7 +111,8 @@ class CleanupThread {
 
     void waitForPendingCleanups() {
         std::promise<void> pendingCleanupsCompletedSignal;
-        std::future<void> pendingCleanupsCompltedWaitable = pendingCleanupsCompletedSignal.get_future();
+        std::future<void> pendingCleanupsCompltedWaitable =
+            pendingCleanupsCompletedSignal.get_future();
         enqueueCleanup([&]() { pendingCleanupsCompletedSignal.set_value(); });
         pendingCleanupsCompltedWaitable.wait();
     }
@@ -110,10 +128,17 @@ class CleanupThread {
     gfxstream::base::WorkerThread<CleanupTask> mWorker;
 };
 
-VirtioGpuFrontend::VirtioGpuFrontend() = default;
+VirtioGpuFrontend::VirtioGpuFrontend() {
+#ifdef CONFIG_AEMU
+    // For Android emulator, use existing verbose logging controls to enable extra debug logs
+    mLogCalls = (gfxstream::base::getEnvironmentVariable("ANDROID_EMU_VIRTIO_DEBUG") == "1");
+#else
+    mLogCalls = true;
+#endif
+}
 
-int VirtioGpuFrontend::init(RendererPtr renderer,
-                            void* cookie, const gfxstream::host::FeatureSet& features,
+int VirtioGpuFrontend::init(RendererPtr renderer, void* cookie,
+                            const gfxstream::host::FeatureSet& features,
                             stream_renderer_fence_callback fence_callback) {
     GFXSTREAM_DEBUG("cookie: %p", cookie);
     mRenderer = renderer;
@@ -144,7 +169,7 @@ void VirtioGpuFrontend::teardown() {
             GFXSTREAM_WARNING("Failed to destroy renderer window.");
         }
 
-        mRenderer->stop(/*wait*/true);
+        mRenderer->stop(/*wait*/ true);
         mRenderer.reset();
     }
 }
@@ -195,12 +220,23 @@ int VirtioGpuFrontend::destroyContext(VirtioGpuCtxId contextId) {
     return 0;
 }
 
-#define DECODE(variable, type, input) \
-    type variable = {};               \
-    memcpy(&variable, input, sizeof(type));
+template <typename T>
+bool SafeDecode(T& out, const uint8_t* buffer, uint32_t buffer_size) {
+    if (buffer_size < sizeof(T)) {
+        GFXSTREAM_ERROR("failed to decode: need %u bytes but have %u bytes)",
+                        sizeof(T), buffer_size);
+        return false;
+    }
+    std::memcpy(&out, buffer, sizeof(T));
+    return true;
+}
 
-int VirtioGpuFrontend::addressSpaceProcessCmd(VirtioGpuCtxId ctxId, uint32_t* dwords) {
-    DECODE(header, gfxstream::gfxstreamHeader, dwords)
+int VirtioGpuFrontend::processAddressSpaceCommand(VirtioGpuCtxId ctxId, const uint8_t* cmd_buffer, uint32_t cmd_buffer_size) {
+    gfxstream::gfxstreamHeader header = {};
+    if (!SafeDecode(header, cmd_buffer, cmd_buffer_size)) {
+        GFXSTREAM_ERROR("failed to decode header");
+        return -EINVAL;
+    }
 
     auto contextIt = mContexts.find(ctxId);
     if (contextIt == mContexts.end()) {
@@ -211,7 +247,11 @@ int VirtioGpuFrontend::addressSpaceProcessCmd(VirtioGpuCtxId ctxId, uint32_t* dw
 
     switch (header.opCode) {
         case GFXSTREAM_CONTEXT_CREATE: {
-            DECODE(contextCreate, gfxstream::gfxstreamContextCreate, dwords)
+            gfxstream::gfxstreamContextCreate contextCreate = {};
+            if (!SafeDecode(contextCreate, cmd_buffer, cmd_buffer_size)) {
+                GFXSTREAM_ERROR("failed to decode contextCreate");
+                return -EINVAL;
+            }
 
             auto resourceIt = mResources.find(contextCreate.resourceId);
             if (resourceIt == mResources.end()) {
@@ -224,7 +264,11 @@ int VirtioGpuFrontend::addressSpaceProcessCmd(VirtioGpuCtxId ctxId, uint32_t* dw
                                                               resource);
         }
         case GFXSTREAM_CONTEXT_PING: {
-            DECODE(contextPing, gfxstream::gfxstreamContextPing, dwords)
+            gfxstream::gfxstreamContextPing contextPing = {};
+            if (!SafeDecode(contextPing, cmd_buffer, cmd_buffer_size)) {
+                GFXSTREAM_ERROR("failed to decode contextPing");
+                return -EINVAL;
+            }
 
             return context.PingAddressSpaceGraphicsInstance(get_gfxstream_address_space_ops(),
                                                             contextPing.resourceId);
@@ -236,26 +280,34 @@ int VirtioGpuFrontend::addressSpaceProcessCmd(VirtioGpuCtxId ctxId, uint32_t* dw
     return 0;
 }
 
-int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
-    if (!cmd) return -EINVAL;
+int VirtioGpuFrontend::processCommand(const struct stream_renderer_command* cmd) {
+    if (!cmd) {
+        GFXSTREAM_ERROR("missing command");
+        return -EINVAL;
+    }
 
-    void* buffer = reinterpret_cast<void*>(cmd->cmd);
+    const uint8_t* cmd_buffer = cmd->cmd;
+    if (!cmd_buffer) {
+        GFXSTREAM_ERROR("missing command buffer");
+        return -EINVAL;
+    }
+
+    const uint32_t cmd_buffer_size = cmd->cmd_size;
+    if (cmd_buffer_size < 4) {
+        GFXSTREAM_ERROR("not enough bytes (got %d)", cmd_buffer_size);
+        return -EINVAL;
+    }
 
     VirtioGpuRing ring = VirtioGpuRingGlobal{};
-    GFXSTREAM_DEBUG("ctx: % u, ring: %s buffer: %p dwords: %d", cmd->ctx_id,
-                    to_string(ring).c_str(), buffer, cmd->cmd_size);
+    D("ctx: %u, ring: %s cmd_buffer: %p size: %d", cmd->ctx_id,
+      to_string(ring).c_str(), cmd_buffer, cmd_buffer_size);
 
-    if (!buffer) {
-        GFXSTREAM_ERROR("error: buffer null");
+    gfxstream::gfxstreamHeader header = {};
+    if (!SafeDecode(header, cmd_buffer, cmd_buffer_size)) {
+        GFXSTREAM_ERROR("failed to decode command header");
         return -EINVAL;
     }
 
-    if (cmd->cmd_size < 4) {
-        GFXSTREAM_ERROR("error: not enough bytes (got %d)", cmd->cmd_size);
-        return -EINVAL;
-    }
-
-    DECODE(header, gfxstream::gfxstreamHeader, buffer);
     switch (header.opCode) {
         case GFXSTREAM_CONTEXT_CREATE:
         case GFXSTREAM_CONTEXT_PING:
@@ -263,7 +315,7 @@ int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
             GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_STREAM_RENDERER_CATEGORY,
                                   "GFXSTREAM_CONTEXT_[CREATE|PING]");
 
-            if (addressSpaceProcessCmd(cmd->ctx_id, (uint32_t*)buffer)) {
+            if (processAddressSpaceCommand(cmd->ctx_id, cmd_buffer, cmd->cmd_size)) {
                 return -EINVAL;
             }
             break;
@@ -278,11 +330,15 @@ int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
                 .mRingIdx = 0,
             };
 
-            DECODE(exportSync, gfxstream::gfxstreamCreateExportSync, buffer)
+            gfxstream::gfxstreamCreateExportSync exportSync = {};
+            if (!SafeDecode(exportSync, cmd_buffer, cmd_buffer_size)) {
+                GFXSTREAM_ERROR("failed to decode exportSync");
+                return -EINVAL;
+            }
 
             uint64_t sync_handle = convert32to64(exportSync.syncHandleLo, exportSync.syncHandleHi);
 
-            GFXSTREAM_DEBUG("wait for gpu ring %s", to_string(ring).c_str());
+            D("wait for gpu ring %s", to_string(ring).c_str());
             auto taskId = mVirtioGpuTimelines->enqueueTask(ring);
 #if GFXSTREAM_ENABLE_HOST_GLES
             FrameBuffer::getFB()->asyncWaitForGpuWithCb(
@@ -295,6 +351,12 @@ int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
             GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_STREAM_RENDERER_CATEGORY,
                                   "GFXSTREAM_CREATE_[IMPORT|EXPORT]_SYNC_VK");
 
+            gfxstream::gfxstreamCreateExportSyncVK exportSyncVK = {};
+            if (!SafeDecode(exportSyncVK, cmd_buffer, cmd_buffer_size)) {
+                GFXSTREAM_ERROR("failed to decode exportSyncVK");
+                return -EINVAL;
+            }
+
             // The guest sync export assumes fence context support and always uses
             // VIRTGPU_EXECBUF_RING_IDX. With this, the task created here must use
             // the same ring as the fence created for the virtio gpu command or the
@@ -304,15 +366,13 @@ int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
                 .mRingIdx = 0,
             };
 
-            DECODE(exportSyncVK, gfxstream::gfxstreamCreateExportSyncVK, buffer)
-
             uint64_t device_handle =
                 convert32to64(exportSyncVK.deviceHandleLo, exportSyncVK.deviceHandleHi);
 
             uint64_t fence_handle =
                 convert32to64(exportSyncVK.fenceHandleLo, exportSyncVK.fenceHandleHi);
 
-            GFXSTREAM_DEBUG("wait for gpu ring %s", to_string(ring).c_str());
+            D("wait for gpu ring %s", to_string(ring).c_str());
             auto taskId = mVirtioGpuTimelines->enqueueTask(ring);
             FrameBuffer::getFB()->asyncWaitForGpuVulkanWithCb(
                 device_handle, fence_handle,
@@ -323,6 +383,12 @@ int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
             GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_STREAM_RENDERER_CATEGORY,
                                   "GFXSTREAM_CREATE_QSRI_EXPORT_VK");
 
+            gfxstream::gfxstreamCreateQSRIExportVK exportQSRI = {};
+            if (!SafeDecode(exportQSRI, cmd_buffer, cmd_buffer_size)) {
+                GFXSTREAM_ERROR("failed to decode exportQSRI");
+                return -EINVAL;
+            }
+
             // The guest QSRI export assumes fence context support and always uses
             // VIRTGPU_EXECBUF_RING_IDX. With this, the task created here must use
             // the same ring as the fence created for the virtio gpu command or the
@@ -332,26 +398,27 @@ int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
                 .mRingIdx = 0,
             };
 
-            DECODE(exportQSRI, gfxstream::gfxstreamCreateQSRIExportVK, buffer)
-
             uint64_t image_handle =
                 convert32to64(exportQSRI.imageHandleLo, exportQSRI.imageHandleHi);
 
-            GFXSTREAM_DEBUG("wait for gpu vk qsri ring %u image 0x%llx", to_string(ring).c_str(),
-                            (unsigned long long)image_handle);
+            D("wait for gpu vk qsri ring %s image 0x%llx", to_string(ring).c_str(),
+              (unsigned long long)image_handle);
             auto taskId = mVirtioGpuTimelines->enqueueTask(ring);
-            FrameBuffer::getFB()->asyncWaitForGpuVulkanQsriWithCb(
-                image_handle,
-                [this, taskId] { mVirtioGpuTimelines->notifyTaskCompletion(taskId); });
+            FrameBuffer::getFB()->asyncWaitForGpuVulkanQsriWithCb(image_handle, [this, taskId] {
+                mVirtioGpuTimelines->notifyTaskCompletion(taskId);
+            });
             break;
         }
         case GFXSTREAM_RESOURCE_CREATE_3D: {
             GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_STREAM_RENDERER_CATEGORY,
                                   "GFXSTREAM_RESOURCE_CREATE_3D");
 
-            DECODE(create3d, gfxstream::gfxstreamResourceCreate3d, buffer)
-            struct stream_renderer_resource_create_args rc3d = {0};
-
+            gfxstream::gfxstreamResourceCreate3d create3d = {};
+            if (!SafeDecode(create3d, cmd_buffer, cmd_buffer_size)) {
+                GFXSTREAM_ERROR("failed to decode create3d");
+                return -EINVAL;
+            }
+            struct stream_renderer_resource_create_args rc3d = {};
             rc3d.target = create3d.target;
             rc3d.format = create3d.format;
             rc3d.bind = create3d.bind;
@@ -376,7 +443,11 @@ int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
             GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_STREAM_RENDERER_CATEGORY,
                                   "GFXSTREAM_ACQUIRE_SYNC");
 
-            DECODE(acquireSync, gfxstream::gfxstreamAcquireSync, buffer);
+            gfxstream::gfxstreamAcquireSync acquireSync = {};
+            if (!SafeDecode(acquireSync, cmd_buffer, cmd_buffer_size)) {
+                GFXSTREAM_ERROR("failed to decode acquireSync");
+                return -EINVAL;
+            }
 
             auto contextIt = mContexts.find(cmd->ctx_id);
             if (contextIt == mContexts.end()) {
@@ -401,8 +472,7 @@ int VirtioGpuFrontend::submitCmd(struct stream_renderer_command* cmd) {
 }
 
 int VirtioGpuFrontend::createFence(uint64_t fence_id, const VirtioGpuRing& ring) {
-    GFXSTREAM_DEBUG("fenceid: %llu ring: %s", (unsigned long long)fence_id,
-                    to_string(ring).c_str());
+    D("fenceid: %llu ring: %s", (unsigned long long)fence_id, to_string(ring).c_str());
 
     mVirtioGpuTimelines->enqueueFence(ring, fence_id);
 
@@ -448,30 +518,33 @@ int VirtioGpuFrontend::importResource(uint32_t res_handle,
         GFXSTREAM_ERROR("import_handle was not provided in call to importResource for handle: %d",
                         res_handle);
         return -EINVAL;
-    } else if (import_data && (import_data->flags & STREAM_RENDERER_IMPORT_FLAG_RESOURCE_EXISTS)) {
-        auto resourceIt = mResources.find(res_handle);
-        if (resourceIt == mResources.end()) {
-            GFXSTREAM_ERROR(
-                "import_data::flags specified STREAM_RENDERER_IMPORT_FLAG_RESOURCE_EXISTS, but "
-                "internal resource does not already exist",
-                res_handle);
-            return -EINVAL;
-        }
-        return resourceIt->second.ImportHandle(import_handle, import_data);
-    } else {
-        auto resourceOpt = VirtioGpuResource::Create(res_handle, import_handle, import_data);
-        if (!resourceOpt) {
-            GFXSTREAM_ERROR("Failed to create resource %u, with import_handle/import_data",
-                            res_handle);
-            return -EINVAL;
-        }
-        mResources[res_handle] = std::move(*resourceOpt);
-        return 0;
+    } else if (!import_data) {
+        GFXSTREAM_ERROR("import_data was not provided in call to importResource for handle: %d",
+                        res_handle);
+        return -EINVAL;
+    } else if (!(import_data->flags & STREAM_RENDERER_IMPORT_FLAG_RESOURCE_EXISTS)) {
+        GFXSTREAM_ERROR(
+            "import_data::flags did not specify STREAM_RENDERER_IMPORT_FLAG_RESOURCE_EXISTS. "
+            "Implementation only supports importing to a resource that already exists (res_handle: "
+            "%d)",
+            res_handle);
+        return -EINVAL;
     }
+
+    auto resourceIt = mResources.find(res_handle);
+    if (resourceIt == mResources.end()) {
+        GFXSTREAM_ERROR(
+            "import_data::flags specified STREAM_RENDERER_IMPORT_FLAG_RESOURCE_EXISTS, but "
+            "internal resource does not already exist",
+            res_handle);
+        return -EINVAL;
+    }
+
+    return resourceIt->second.ImportHandle(import_handle, import_data);
 }
 
 void VirtioGpuFrontend::unrefResource(uint32_t resourceId) {
-    GFXSTREAM_DEBUG("resource: %u", resourceId);
+    D("resource: %u", resourceId);
 
     auto resourceIt = mResources.find(resourceId);
     if (resourceIt == mResources.end()) return;
@@ -488,7 +561,7 @@ void VirtioGpuFrontend::unrefResource(uint32_t resourceId) {
 }
 
 int VirtioGpuFrontend::attachIov(int resourceId, struct iovec* iov, int num_iovs) {
-    GFXSTREAM_DEBUG("resource:%d numiovs: %d", resourceId, num_iovs);
+    D("resource:%d numiovs: %d", resourceId, num_iovs);
 
     auto it = mResources.find(resourceId);
     if (it == mResources.end()) {
@@ -501,7 +574,7 @@ int VirtioGpuFrontend::attachIov(int resourceId, struct iovec* iov, int num_iovs
 }
 
 void VirtioGpuFrontend::detachIov(int resourceId) {
-    GFXSTREAM_DEBUG("resource:%d", resourceId);
+    D("resource:%d", resourceId);
 
     auto it = mResources.find(resourceId);
     if (it == mResources.end()) {
@@ -585,8 +658,8 @@ void VirtioGpuFrontend::fillCaps(uint32_t set, void* caps) {
                 capset->deferredMapping = 1;
             }
 
-            if (mFeatures.VulkanBatchedDescriptorSetUpdate.enabled) {
-                capset->vulkanBatchedDescriptorSetUpdate=1;
+            if (mFeatures.VulkanBatchedDescriptorSetUpdate.enabled()) {
+                capset->vulkanBatchedDescriptorSetUpdate = 1;
             }
             capset->noRenderControlEnc = 1;
             capset->blobAlignment = mPageSize;
@@ -615,6 +688,7 @@ void VirtioGpuFrontend::fillCaps(uint32_t set, void* caps) {
                 MAKE_FORMAT_AND_NAME(VIRGL_FORMAT_B8G8R8X8_UNORM),
                 MAKE_FORMAT_AND_NAME(VIRGL_FORMAT_NV12),
                 MAKE_FORMAT_AND_NAME(VIRGL_FORMAT_P010),
+                MAKE_FORMAT_AND_NAME(VIRGL_FORMAT_P210),
                 MAKE_FORMAT_AND_NAME(VIRGL_FORMAT_R10G10B10A2_UNORM),
                 MAKE_FORMAT_AND_NAME(VIRGL_FORMAT_R16_UNORM),
                 MAKE_FORMAT_AND_NAME(VIRGL_FORMAT_R16G16B16A16_FLOAT),
@@ -632,7 +706,7 @@ void VirtioGpuFrontend::fillCaps(uint32_t set, void* caps) {
             };
 #undef MAKE_FORMAT_AND_NAME
 
-            if (!mFeatures.MinimalLogging.enabled) {
+            if (!mFeatures.MinimalLogging.enabled()) {
                 GFXSTREAM_INFO("Format support:");
             }
             for (std::size_t i = 0; i < std::size(kPossibleFormats); i++) {
@@ -648,13 +722,14 @@ void VirtioGpuFrontend::fillCaps(uint32_t set, void* caps) {
                 set_virgl_format_supported(capset->virglSupportedFormats, possibleFormat.format,
                                            supported);
 
-                if (!mFeatures.MinimalLogging.enabled) {
+                if (!mFeatures.MinimalLogging.enabled()) {
                     GFXSTREAM_INFO(" %s: %s", possibleFormat.name,
                                    (supported ? "supported" : "unsupported"));
                 }
             }
 
             capset->hasTraceAsyncCommand = 1;
+            capset->hasSetMetadataCommand = 1;
 
             break;
         }
@@ -684,7 +759,7 @@ void VirtioGpuFrontend::fillCaps(uint32_t set, void* caps) {
 }
 
 void VirtioGpuFrontend::attachResource(uint32_t contextId, uint32_t resourceId) {
-    GFXSTREAM_DEBUG("ctxid: %u resid: %u", contextId, resourceId);
+    D("ctxid: %u resid: %u", contextId, resourceId);
 
     auto contextIt = mContexts.find(contextId);
     if (contextIt == mContexts.end()) {
@@ -706,7 +781,7 @@ void VirtioGpuFrontend::attachResource(uint32_t contextId, uint32_t resourceId) 
 }
 
 void VirtioGpuFrontend::detachResource(uint32_t contextId, uint32_t resourceId) {
-    GFXSTREAM_DEBUG("ctxid: %u resid: %u", contextId, resourceId);
+    D("ctxid: %u resid: %u", contextId, resourceId);
 
     auto contextIt = mContexts.find(contextId);
     if (contextIt == mContexts.end()) {
@@ -737,7 +812,7 @@ void VirtioGpuFrontend::detachResource(uint32_t contextId, uint32_t resourceId) 
 
 int VirtioGpuFrontend::getResourceInfo(uint32_t resourceId,
                                        struct stream_renderer_resource_info* info) {
-    GFXSTREAM_DEBUG("resource: %u", resourceId);
+    D("resource: %u", resourceId);
 
     if (!info) {
         GFXSTREAM_ERROR("Failed to get info: invalid info struct.");
@@ -755,11 +830,11 @@ int VirtioGpuFrontend::getResourceInfo(uint32_t resourceId,
 
 void VirtioGpuFrontend::flushResource(uint32_t res_handle) {
     auto taskId = mVirtioGpuTimelines->enqueueTask(VirtioGpuRingGlobal{});
-    FrameBuffer::getFB()->postWithCallback(
-        res_handle, [this, taskId](std::shared_future<void> waitForGpu) {
-            waitForGpu.wait();
-            mVirtioGpuTimelines->notifyTaskCompletion(taskId);
-        });
+    FrameBuffer::getFB()->postWithCallback(res_handle,
+                                           [this, taskId](std::shared_future<void> waitForGpu) {
+                                               waitForGpu.wait();
+                                               mVirtioGpuTimelines->notifyTaskCompletion(taskId);
+                                           });
 }
 
 int VirtioGpuFrontend::createBlob(uint32_t contextId, uint32_t resourceId,
@@ -790,9 +865,9 @@ int VirtioGpuFrontend::createBlob(uint32_t contextId, uint32_t resourceId,
 }
 
 int VirtioGpuFrontend::resourceMap(uint32_t resourceId, void** hvaOut, uint64_t* sizeOut) {
-    GFXSTREAM_DEBUG("resource: %u", resourceId);
+    D("resource: %u", resourceId);
 
-    if (mFeatures.ExternalBlob.enabled) {
+    if (mFeatures.ExternalBlob.enabled()) {
         GFXSTREAM_ERROR("Failed to map resource: external blob enabled.");
         return -EINVAL;
     }
@@ -811,7 +886,7 @@ int VirtioGpuFrontend::resourceMap(uint32_t resourceId, void** hvaOut, uint64_t*
 }
 
 int VirtioGpuFrontend::resourceUnmap(uint32_t resourceId) {
-    GFXSTREAM_DEBUG("resource: %u", resourceId);
+    D("resource: %u", resourceId);
 
     auto it = mResources.find(resourceId);
     if (it == mResources.end()) {
@@ -841,7 +916,7 @@ int VirtioGpuFrontend::platformDestroySharedEglContext(void* context) {
 }
 
 int VirtioGpuFrontend::resourceMapInfo(uint32_t resourceId, uint32_t* map_info) {
-    GFXSTREAM_DEBUG("resource: %u", resourceId);
+    D("resource: %u", resourceId);
 
     auto resourceIt = mResources.find(resourceId);
     if (resourceIt == mResources.end()) {
@@ -854,7 +929,7 @@ int VirtioGpuFrontend::resourceMapInfo(uint32_t resourceId, uint32_t* map_info) 
 }
 
 int VirtioGpuFrontend::exportBlob(uint32_t resourceId, struct stream_renderer_handle* handle) {
-    GFXSTREAM_DEBUG("resource: %u", resourceId);
+    D("resource: %u", resourceId);
 
     auto resourceIt = mResources.find(resourceId);
     if (resourceIt == mResources.end()) {
@@ -866,26 +941,28 @@ int VirtioGpuFrontend::exportBlob(uint32_t resourceId, struct stream_renderer_ha
 }
 
 int VirtioGpuFrontend::exportFence(uint64_t fenceId, struct stream_renderer_handle* handle) {
-    auto it = mSyncMap.find(fenceId);
-    if (it == mSyncMap.end()) {
+    auto syncIt = mSyncMap.find(fenceId);
+    if (syncIt == mSyncMap.end()) {
+        return -EINVAL;
+    }
+    auto& sync = syncIt->second;
+
+    auto rawDescriptorOpt = sync->descriptor.release();
+    if (!rawDescriptorOpt) {
         return -EINVAL;
     }
 
-    auto& entry = it->second;
-    DescriptorType rawDescriptor;
-    auto rawDescriptorOpt = entry->descriptor.release();
-    if (rawDescriptorOpt)
-        rawDescriptor = *rawDescriptorOpt;
-    else
-        return -EINVAL;
+    DescriptorType rawDescriptor = *rawDescriptorOpt;
 
-    handle->handle_type = entry->streamHandleType;
+    handle->handle_type = sync->streamHandleType;
 
 #ifdef _WIN32
     handle->os_handle = static_cast<int64_t>(reinterpret_cast<intptr_t>(rawDescriptor));
 #else
     handle->os_handle = static_cast<int64_t>(rawDescriptor);
 #endif
+
+    mSyncMap.erase(syncIt);
 
     return 0;
 }
@@ -936,25 +1013,17 @@ int VirtioGpuFrontend::destroyVirtioGpuObjects() {
     return 0;
 }
 
-void VirtioGpuFrontend::setupWindow(void* nativeWindowHandle,
-                                    int32_t windowX,
-                                    int32_t windowY,
-                                    int32_t windowWidth,
-                                    int32_t windowHeight,
-                                    int32_t framebufferWidth,
-                                    int32_t framebufferHeight) {
+void VirtioGpuFrontend::setupWindow(void* nativeWindowHandle, int32_t windowX, int32_t windowY,
+                                    int32_t windowWidth, int32_t windowHeight,
+                                    int32_t framebufferWidth, int32_t framebufferHeight) {
     if (!mRenderer) {
         GFXSTREAM_ERROR("Failed to setup window: renderer not available.");
         return;
     }
 
     bool success = mRenderer->showOpenGLSubwindow((FBNativeWindowType)(uintptr_t)nativeWindowHandle,
-                                                  windowX,
-                                                  windowY,
-                                                  windowWidth,
-                                                  windowHeight,
-                                                  framebufferWidth,
-                                                  framebufferHeight,
+                                                  windowX, windowY, windowWidth, windowHeight,
+                                                  framebufferWidth, framebufferHeight,
                                                   /*dpr=*/1.0f,
                                                   /*rotation=*/0,
                                                   /*deleteExisting=*/false,
@@ -964,9 +1033,7 @@ void VirtioGpuFrontend::setupWindow(void* nativeWindowHandle,
     }
 }
 
-void VirtioGpuFrontend::setScreenMask(int width,
-                                      int height,
-                                      const uint8_t* rgbaData) {
+void VirtioGpuFrontend::setScreenMask(int width, int height, const uint8_t* rgbaData) {
     if (!mRenderer) {
         GFXSTREAM_ERROR("Failed to set screen mask: renderer not available.");
         return;
@@ -994,7 +1061,7 @@ int VirtioGpuFrontend::snapshotRenderer(const char* directory) {
     const std::filesystem::path snapshotDirectory = std::string(directory);
     const std::filesystem::path snapshotPath = snapshotDirectory / kSnapshotBasenameRenderer;
 
-    StdioStream stream(fopen(snapshotPath.c_str(), "wb"), StdioStream::kOwner);
+    StdioStream stream(fopen(snapshotPath.string().c_str(), "wb"), StdioStream::kOwner);
 
     if (!mRenderer) {
         GFXSTREAM_ERROR("Failed to snapshot renderer: renderer not available.");
@@ -1036,9 +1103,10 @@ int VirtioGpuFrontend::snapshotFrontend(const char* directory) {
 
     const std::filesystem::path snapshotDirectory = std::string(directory);
     const std::filesystem::path snapshotPath = snapshotDirectory / kSnapshotBasenameFrontend;
-    int snapshotFd = open(snapshotPath.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0660);
+    int snapshotFd = open(snapshotPath.string().c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0660);
     if (snapshotFd < 0) {
-        GFXSTREAM_ERROR("Failed to save snapshot: failed to open %s", snapshotPath.c_str());
+        GFXSTREAM_ERROR("Failed to save snapshot: failed to open %s",
+                        snapshotPath.string().c_str());
         return -1;
     }
     google::protobuf::io::FileOutputStream snapshotOutputStream(snapshotFd);
@@ -1055,7 +1123,7 @@ int VirtioGpuFrontend::snapshotAsg(const char* directory) {
     const std::filesystem::path snapshotDirectory = std::string(directory);
     const std::filesystem::path snapshotPath = snapshotDirectory / kSnapshotBasenameAsg;
 
-   StdioStream stream(fopen(snapshotPath.c_str(), "wb"), StdioStream::kOwner);
+    StdioStream stream(fopen(snapshotPath.string().c_str(), "wb"), StdioStream::kOwner);
 
     int ret = gfxstream_address_space_save_memory_state(&stream);
     if (ret) {
@@ -1066,7 +1134,7 @@ int VirtioGpuFrontend::snapshotAsg(const char* directory) {
 }
 
 int VirtioGpuFrontend::snapshot(const char* directory) {
-    GFXSTREAM_DEBUG("directory:%s", directory);
+    D("directory:%s", directory);
 
     if (!mRenderer) {
         GFXSTREAM_ERROR("Failed to restore renderer: renderer not available.");
@@ -1092,7 +1160,7 @@ int VirtioGpuFrontend::snapshot(const char* directory) {
         return ret;
     }
 
-    GFXSTREAM_DEBUG("directory:%s - done!", directory);
+    D("directory:%s - done!", directory);
     return 0;
 }
 
@@ -1100,7 +1168,7 @@ int VirtioGpuFrontend::restoreRenderer(const char* directory) {
     const std::filesystem::path snapshotDirectory = std::string(directory);
     const std::filesystem::path snapshotPath = snapshotDirectory / kSnapshotBasenameRenderer;
 
-    StdioStream stream(fopen(snapshotPath.c_str(), "rb"), StdioStream::kOwner);
+    StdioStream stream(fopen(snapshotPath.string().c_str(), "rb"), StdioStream::kOwner);
 
     if (!mRenderer) {
         GFXSTREAM_ERROR("Failed to restore renderer: renderer not available.");
@@ -1117,9 +1185,10 @@ int VirtioGpuFrontend::restoreFrontend(const char* directory) {
 
     gfxstream::host::snapshot::VirtioGpuFrontendSnapshot snapshot;
     {
-        int snapshotFd = open(snapshotPath.c_str(), O_RDONLY);
+        int snapshotFd = open(snapshotPath.string().c_str(), O_RDONLY);
         if (snapshotFd < 0) {
-            GFXSTREAM_ERROR("Failed to restore snapshot: failed to open %s", snapshotPath.c_str());
+            GFXSTREAM_ERROR("Failed to restore snapshot: failed to open %s",
+                            snapshotPath.string().c_str());
             return -1;
         }
         google::protobuf::io::FileInputStream snapshotInputStream(snapshotFd);
@@ -1164,7 +1233,7 @@ int VirtioGpuFrontend::restoreAsg(const char* directory) {
     const std::filesystem::path snapshotDirectory = std::string(directory);
     const std::filesystem::path snapshotPath = snapshotDirectory / kSnapshotBasenameAsg;
 
-    StdioStream stream(fopen(snapshotPath.c_str(), "rb"), StdioStream::kOwner);
+    StdioStream stream(fopen(snapshotPath.string().c_str(), "rb"), StdioStream::kOwner);
 
     // Gather external memory info that the ASG device needs to reload.
     AddressSpaceDeviceLoadResources asgLoadResources;
@@ -1212,7 +1281,7 @@ int VirtioGpuFrontend::restoreAsg(const char* directory) {
 }
 
 int VirtioGpuFrontend::restore(const char* directory) {
-    GFXSTREAM_DEBUG("directory:%s", directory);
+    D("directory:%s", directory);
 
     destroyVirtioGpuObjects();
 
@@ -1240,7 +1309,7 @@ int VirtioGpuFrontend::restore(const char* directory) {
     }
     mRenderer->resumeAll();
 
-    GFXSTREAM_DEBUG("directory:%s - done!", directory);
+    D("directory:%s - done!", directory);
     return 0;
 }
 

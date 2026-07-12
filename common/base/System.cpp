@@ -33,7 +33,9 @@
 #endif
 
 #ifdef __APPLE__
+#if !TARGET_OS_IOS
 #include <libproc.h>
+#endif  // !TARGET_OS_IOS
 #include <mach/clock.h>
 #include <mach/mach.h>
 #endif  // __APPLE__
@@ -42,7 +44,41 @@
 // #include "gfxstream/msvc.h"
 // #include <dirent.h>
 #include <sys/stat.h>
-#include <sys/time.h>
+#include <winsock.h>
+static int gettimeofday(struct timeval *tp, void *tzp)
+{
+	typedef void (__stdcall * pfnGetSystemTimePreciseAsFileTime)(LPFILETIME lpSystemTimeAsFileTime);
+	HMODULE hKernel32 = NULL;
+	pfnGetSystemTimePreciseAsFileTime fnGetSystemTimePreciseAsFileTime = NULL;
+	FILETIME time;
+	hKernel32 = GetModuleHandleW(L"kernel32.dll");
+#if defined(__GNUC__) && (__GNUC__ == 8)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
+	if (hKernel32)
+		fnGetSystemTimePreciseAsFileTime = (pfnGetSystemTimePreciseAsFileTime) GetProcAddress(hKernel32, "GetSystemTimePreciseAsFileTime");
+#if defined(__GNUC__) && (__GNUC__ == 8)
+#pragma GCC diagnostic pop
+#endif
+
+	if (fnGetSystemTimePreciseAsFileTime)
+		fnGetSystemTimePreciseAsFileTime(&time);
+	else
+		GetSystemTimeAsFileTime(&time);
+
+	uint64_t time64 = ((uint64_t)time.dwHighDateTime << 32) | time.dwLowDateTime;
+	time64 = (time64 / 10 - 11644473600ULL * 1000000ULL);
+
+	if (tp)
+	{
+		tp->tv_sec = (long) (time64 / 1000000ULL);
+		tp->tv_usec = (long) (time64 % 1000000ULL);
+	}
+
+	/* The gettimeofday() function returns 0 and no value is reserved to indicate an error. */
+	return 0;
+}
 #else
 #include <time.h>
 #include <sys/time.h>
@@ -339,7 +375,7 @@ std::string getProgramDirectoryFromPlatform() {
             res.assign(path);
         }
     }
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !TARGET_OS_IOS
     char s[PATH_MAX];
     auto pid = getpid();
     proc_pidpath(pid, s, sizeof(s));
@@ -354,7 +390,12 @@ std::string getProgramDirectoryFromPlatform() {
     } else {
         res.assign("<unknown-application-dir>");
     }
+#elif defined(__APPLE__) && TARGET_OS_IOS
+    res.assign("<unknown-application-dir>");
 #elif defined(_WIN32) || defined(__MINGW64__)
+#ifndef PATH_MAX
+#define PATH_MAX 1024
+#endif
     Win32UnicodeString appDir(PATH_MAX);
     int len = GetModuleFileNameW(0, appDir.data(), appDir.size());
     res.assign("<unknown-application-dir>");

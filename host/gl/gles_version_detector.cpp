@@ -104,8 +104,8 @@ GLESDispatchMaxVersion calcMaxVersionFromDispatch(const gfxstream::host::Feature
 
     if (get_gfxstream_renderer() == SELECTED_RENDERER_HOST
         || get_gfxstream_renderer() == SELECTED_RENDERER_SWIFTSHADER_INDIRECT
-        || get_gfxstream_renderer() == SELECTED_RENDERER_ANGLE_INDIRECT
-        || get_gfxstream_renderer() == SELECTED_RENDERER_ANGLE9_INDIRECT) {
+        || get_gfxstream_renderer() == SELECTED_RENDERER_LAVAPIPE
+        || get_gfxstream_renderer() == SELECTED_RENDERER_ANGLE_INDIRECT) {
         if (s_egl.eglGetMaxGLESVersion) {
             maxVersion =
                 (GLESDispatchMaxVersion)s_egl.eglGetMaxGLESVersion(dpy);
@@ -209,7 +209,7 @@ std::string filterExtensionsBasedOnMaxVersion(const gfxstream::host::FeatureSet&
     // a. the dispatch version on the host is ES 2
     // b. the guest image is not updated for ES 3+
     // (GLESDynamicVersion is disabled)
-    if (ver > GLES_DISPATCH_MAX_VERSION_2 && features.GlesDynamicVersion.enabled) {
+    if (ver > GLES_DISPATCH_MAX_VERSION_2 && features.GlesDynamicVersion.enabled()) {
         return exts;
     }
 

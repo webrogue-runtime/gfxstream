@@ -64,106 +64,87 @@ ParseGfxstreamFeatures(const int rendererFlags,
     gfxstream::base::setEnvironmentVariable("ANDROID_EMU_HEADLESS", "1");
 
     gfxstream::host::FeatureSet features;
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, EglOnEgl,
         rendererFlags & STREAM_RENDERER_FLAGS_USE_EGL_BIT ||
         gfxstream::base::getEnvironmentVariable("ANDROID_EGL_ON_EGL") == "1");
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(&features, VulkanExternalSync,
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(&features, VulkanExternalSync,
                                        rendererFlags & STREAM_RENDERER_FLAGS_VULKAN_EXTERNAL_SYNC);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, GlAsyncSwap, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, GlDirectMem, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, GlDma, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, GlesDynamicVersion, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, GlPipeChecksum, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, GuestVulkanOnly,
         (rendererFlags & STREAM_RENDERER_FLAGS_USE_VK_BIT) &&
         !(rendererFlags & STREAM_RENDERER_FLAGS_USE_GLES_BIT));
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, HostComposition, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, NativeTextureDecompression, false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, NoDelayCloseColorBuffer, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, RefCountPipe,
         /*Resources are ref counted via guest file objects.*/ false);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
+        &features, Surfaceless, rendererFlags & STREAM_RENDERER_FLAGS_USE_SURFACELESS_BIT);
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, SystemBlob,
         rendererFlags & STREAM_RENDERER_FLAGS_USE_SYSTEM_BLOB);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VirtioGpuFenceContexts, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VirtioGpuNativeSync, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VirtioGpuNext, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, Vulkan,
         rendererFlags & STREAM_RENDERER_FLAGS_USE_VK_BIT);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VulkanBatchedDescriptorSetUpdate, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VulkanIgnoredHandles, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VulkanNativeSwapchain,
         rendererFlags & STREAM_RENDERER_FLAGS_VULKAN_NATIVE_SWAPCHAIN_BIT);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VulkanNullOptionalStrings, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VulkanQueueSubmitWithCommands, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VulkanShaderFloat16Int8, true);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VulkanSnapshots,
         gfxstream::base::getEnvironmentVariable("ANDROID_GFXSTREAM_CAPTURE_VK_SNAPSHOT") == "1");
     // b:423003060
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(
         &features, VulkanAllocateHostVisibleAsUdmabuf,
         gfxstream::base::IsAndroidKernel6_6() && gfxstream::base::HasUdmabufDevice());
     // udmabuf requires ExternalBlob feature.
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(&features, ExternalBlob,
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(&features, ExternalBlob,
                                        rendererFlags & STREAM_RENDERER_FLAGS_USE_EXTERNAL_BLOB ||
-                                           features.VulkanAllocateHostVisibleAsUdmabuf.enabled);
-    GFXSTREAM_SET_FEATURE_ON_CONDITION(&features, VulkanEnsureCachedCoherentMemoryAvailable, true);
+                                           features.VulkanAllocateHostVisibleAsUdmabuf.enabled());
+    GFXSTREAM_SET_BOOL_FEATURE_ON_CONDITION(&features, VulkanEnsureCachedCoherentMemoryAvailable, true);
 
     for (const std::string& rendererFeature : gfxstream::Split(rendererFeatures, ",;")) {
         if (rendererFeature.empty()) continue;
 
-        const std::vector<std::string>& parts = gfxstream::Split(rendererFeature, ":");
-        if (parts.size() != 2) {
-            GFXSTREAM_ERROR("Error: invalid renderer features: %s", rendererFeature.c_str());
+        if (!features.processFeatureString(
+                rendererFeature, "Overridden via STREAM_RENDERER_PARAM_RENDERER_FEATURES")) {
+            GFXSTREAM_ERROR("Could not process the feature string: %s", rendererFeature.c_str());
             return std::nullopt;
         }
-
-        const std::string& feature_name = parts[0];
-
-        auto feature_it = features.map.find(feature_name);
-        if (feature_it == features.map.end()) {
-            GFXSTREAM_ERROR("Error: invalid renderer feature: '%s'", feature_name.c_str());
-            return std::nullopt;
-        }
-
-        const std::string& feature_status = parts[1];
-        if (feature_status != "enabled" && feature_status != "disabled") {
-            GFXSTREAM_ERROR("Error: invalid option %s for renderer feature: %s",
-                            feature_status.c_str(), feature_name.c_str());
-            return std::nullopt;
-        }
-
-        auto& feature_info = feature_it->second;
-        feature_info->enabled = feature_status == "enabled";
-        feature_info->reason = "Overridden via STREAM_RENDERER_PARAM_RENDERER_FEATURES";
-
-        GFXSTREAM_INFO("Gfxstream feature %s %s", feature_name.c_str(), feature_status.c_str());
     }
 
-    if (features.SystemBlob.enabled) {
-        if (!features.ExternalBlob.enabled) {
+    if (features.SystemBlob.enabled()) {
+        if (!features.ExternalBlob.enabled()) {
             GFXSTREAM_ERROR("The SystemBlob features requires the ExternalBlob feature.");
             return std::nullopt;
         }
@@ -171,7 +152,7 @@ ParseGfxstreamFeatures(const int rendererFlags,
         GFXSTREAM_WARNING("Warning: USE_SYSTEM_BLOB has only been tested on Windows");
 #endif
     }
-    if (features.VulkanNativeSwapchain.enabled && !features.Vulkan.enabled) {
+    if (features.VulkanNativeSwapchain.enabled() && !features.Vulkan.enabled()) {
         GFXSTREAM_ERROR("can't enable vulkan native swapchain, Vulkan is disabled");
         return std::nullopt;
     }
@@ -194,35 +175,25 @@ GetGfxstreamFeatures(const int rendererFlags,
     return ParseGfxstreamFeatures(rendererFlags, rendererFeaturesString);
 }
 
-SelectedRenderer parse_renderer(std::string_view renderer) {
-    if (renderer == "host"sv || renderer == "on"sv) {
-        return SELECTED_RENDERER_HOST;
-    } else if (renderer == "off"sv) {
-        return SELECTED_RENDERER_OFF;
-    } else if (renderer == "guest"sv) {
-        return SELECTED_RENDERER_GUEST;
-    } else if (renderer == "mesa"sv) {
-        return SELECTED_RENDERER_MESA;
-    } else if (renderer == "swiftshader"sv) {
-        return SELECTED_RENDERER_SWIFTSHADER;
-    } else if (renderer == "angle"sv || renderer == "swangle"sv) {
-        return SELECTED_RENDERER_ANGLE;
-    } else if (renderer == "angle9"sv) {
-        return SELECTED_RENDERER_ANGLE9;
-    } else if (renderer == "swiftshader_indirect"sv) {
-        return SELECTED_RENDERER_SWIFTSHADER_INDIRECT;
-    } else if (renderer == "angle_indirect"sv || renderer == "swangle_indirect"sv) {
-        return SELECTED_RENDERER_ANGLE_INDIRECT;
-    } else if (renderer == "angle9_indirect"sv) {
-        return SELECTED_RENDERER_ANGLE9_INDIRECT;
-    } else {
-        return SELECTED_RENDERER_UNKNOWN;
-    }
-}
 
 // TODO(b/418238945): Remove this AEMU specific code if possible.
 void MaybeConfigureRenderer(gfxstream::RenderLib& rendererLibrary) {
     if (const std::string& s_renderer = gfxstream::base::getEnvironmentVariable("ANDROID_EMU_RENDERER"); !s_renderer.empty()) {
+
+        auto parse_renderer = [](std::string_view renderer) {
+            if (renderer == "host"sv || renderer == "on"sv) {
+                return SELECTED_RENDERER_HOST;
+            } else if (renderer == "swiftshader"sv || renderer == "swiftshader_indirect"sv) {
+                return SELECTED_RENDERER_SWIFTSHADER_INDIRECT;
+            } else if (renderer == "lavapipe"sv) {
+                return SELECTED_RENDERER_LAVAPIPE;
+            } else if (renderer == "swangle"sv || renderer == "swangle_indirect"sv) {
+                return SELECTED_RENDERER_ANGLE_INDIRECT;
+            } else {
+                return SELECTED_RENDERER_UNKNOWN;
+            }
+        };
+
         SelectedRenderer renderer = parse_renderer(s_renderer);
         if (renderer == SELECTED_RENDERER_UNKNOWN) {
             GFXSTREAM_FATAL("Unknown renderer specified in ANDROID_EMU_RENDERER envvar: ", s_renderer.c_str());
@@ -389,7 +360,7 @@ VG_EXPORT void stream_renderer_context_destroy(uint32_t handle) {
 VG_EXPORT int stream_renderer_submit_cmd(struct stream_renderer_command* cmd) {
     GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_STREAM_RENDERER_CATEGORY, "stream_renderer_submit_cmd()");
 
-    return sFrontend()->submitCmd(cmd);
+    return sFrontend()->processCommand(cmd);
 }
 
 VG_EXPORT int stream_renderer_transfer_read_iov(uint32_t handle, uint32_t ctx_id, uint32_t level,
@@ -416,8 +387,7 @@ VG_EXPORT void stream_renderer_get_cap_set(uint32_t set, uint32_t* max_ver, uint
     GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_STREAM_RENDERER_CATEGORY,
                           "stream_renderer_get_cap_set()");
 
-    GFXSTREAM_TRACE_NAME_TRACK(GFXSTREAM_TRACE_TRACK_FOR_CURRENT_THREAD(),
-                               "Main Virtio Gpu Thread");
+    GFXSTREAM_TRACE_NAME_THREAD("Main Virtio Gpu Thread");
 
     // `max_ver` not useful
     return sFrontend()->getCapset(set, max_size);
@@ -795,12 +765,13 @@ VG_EXPORT int stream_renderer_init(struct stream_renderer_param* stream_renderer
     }
     gfxstream::host::FeatureSet features = std::move(*featuresOpt);
 
-    if (!features.MinimalLogging.enabled) {
+    if (!features.MinimalLogging.enabled()) {
         GFXSTREAM_INFO("Gfxstream features:");
+
         for (const auto& [_, featureInfo] : features.map) {
-            GFXSTREAM_INFO("    %s: %s (%s)", featureInfo->name.c_str(),
-                           (featureInfo->enabled ? "enabled" : "disabled"),
-                           featureInfo->reason.c_str());
+            GFXSTREAM_INFO("    %s: %s (%s)", featureInfo->getName().c_str(),
+                           featureInfo->getValueReadable().c_str(),
+                           featureInfo->getReason().c_str());
         }
     }
 
